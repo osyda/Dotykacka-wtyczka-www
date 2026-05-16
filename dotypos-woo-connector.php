@@ -1914,9 +1914,7 @@ final class Dotypos_Woo_Connector {
             foreach ($employeeSales as $emp) {
                 if (!is_array($emp)) continue;
                 $name   = (string)($emp['name'] ?? '');
-                $amount = self::mm_to_float(
-                    $emp['saleValue'] ?? ($emp['totalValue'] ?? ($emp['revenue'] ?? ($emp['total'] ?? 0)))
-                );
+                $amount = self::mm_to_float($emp['value'] ?? 0);
                 if (stripos($name, '/WYNOS') !== false) {
                     $w += $amount;
                 } else {
@@ -1936,9 +1934,7 @@ final class Dotypos_Woo_Connector {
                 if (!is_array($pt)) continue;
                 $typeId = (string)($pt['typeId'] ?? '');
                 if ($typeId === $cardMethodId) {
-                    $t += self::mm_to_float(
-                        $pt['totalValue'] ?? ($pt['saleValue'] ?? ($pt['value'] ?? 0))
-                    );
+                    $t += self::mm_to_float($pt['total'] ?? 0);
                 }
             }
         }
