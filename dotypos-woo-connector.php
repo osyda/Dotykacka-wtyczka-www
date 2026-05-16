@@ -61,6 +61,8 @@ final class Dotypos_Woo_Connector {
             'daily_report_clicksend_username'    => '',
             'daily_report_clicksend_api_key'     => '',
             'daily_report_sms_sender'            => '',
+            'daily_report_time_weekday'          => '22:40',
+            'daily_report_time_weekend'          => '23:40',
             'daily_report_card_payment_method_id'=> '900000002',
             'daily_report_pizza_category_id'     => '1871188158721371',
             'daily_report_branch_sala_id'        => '146005859',
@@ -153,7 +155,7 @@ final class Dotypos_Woo_Connector {
 
         // Daily report settings section
         add_settings_section('dwco_daily_report', 'Raport dzienny SMS', function () {
-            echo '<p>Automatyczny raport dzienny ze sprzedaży (SALA + OGRÓD) wysyłany przez ClickSend. Harmonogram: pn–czw, nd o 22:40; pt–sb o 23:40.</p>';
+            echo '<p>Automatyczny raport dzienny ze sprzedaży (SALA + OGRÓD) wysyłany przez ClickSend. Godziny wysyłki konfigurujesz poniżej (okno ±4 minuty).</p>';
         }, 'dwco');
 
         add_settings_field('daily_report_enabled', 'Włącz raport SMS', [__CLASS__, 'field_yesno'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_enabled']);
@@ -161,6 +163,8 @@ final class Dotypos_Woo_Connector {
         add_settings_field('daily_report_clicksend_username', 'ClickSend username', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_clicksend_username', 'placeholder' => 'np. jan@example.com']);
         add_settings_field('daily_report_clicksend_api_key', 'ClickSend API key', [__CLASS__, 'field_password'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_clicksend_api_key', 'placeholder' => '••••••••']);
         add_settings_field('daily_report_sms_sender', 'Nadawca SMS', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_sms_sender', 'placeholder' => 'np. MAMMAROSA']);
+        add_settings_field('daily_report_time_weekday', 'Godzina wysyłki pn–czw, nd', [__CLASS__, 'field_time'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_time_weekday']);
+        add_settings_field('daily_report_time_weekend', 'Godzina wysyłki pt–sb', [__CLASS__, 'field_time'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_time_weekend']);
         add_settings_field('daily_report_branch_sala_id', 'Branch ID SALA', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_branch_sala_id', 'placeholder' => '146005859']);
         add_settings_field('daily_report_branch_ogrod_id', 'Branch ID OGRÓD', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_branch_ogrod_id', 'placeholder' => '150149839']);
         add_settings_field('daily_report_card_payment_method_id', 'Payment method ID karta', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_card_payment_method_id', 'placeholder' => '900000002']);
@@ -212,6 +216,12 @@ final class Dotypos_Woo_Connector {
         if ($key === 'refresh_token' && !empty($opts['refresh_token'])) {
             echo '<p class="description">Token zapisany. Mo&#380;esz klikn&#261;&#263; &bdquo;Test po&#322;&#261;czenia&rdquo;.</p>';
         }
+    }
+    public static function field_time($args) {
+        $opts = self::get_options();
+        $key  = $args['key'];
+        $val  = $opts[$key] ?? '22:00';
+        echo "<input type='time' name='".self::OPT_KEY."[$key]' value='".esc_attr($val)."' />";
     }
     public static function field_yesno($args) {
         $opts = self::get_options();
@@ -2016,9 +2026,18 @@ final class Dotypos_Woo_Connector {
         $hour   = (int)$now->format('H');
         $minute = (int)$now->format('i');
 
-        // Mon–Thu + Sun at 22:40–22:44; Fri–Sat at 23:40–23:44
-        $weekdaySlot = in_array($dow, [1,2,3,4,7], true) && $hour === 22 && $minute >= 40 && $minute <= 44;
-        $weekendSlot = in_array($dow, [5,6], true)       && $hour === 23 && $minute >= 40 && $minute <= 44;
+        $timeWeekday = trim($opts['daily_report_time_weekday'] ?? '22:40');
+        $timeWeekend = trim($opts['daily_report_time_weekend'] ?? '23:40');
+
+        $inWindow = static function (string $hhmm) use ($hour, $minute): bool {
+            [$h, $m] = array_map('intval', explode(':', $hhmm));
+            $nowMin  = $hour * 60 + $minute;
+            $slotMin = $h * 60 + $m;
+            return $nowMin >= $slotMin && $nowMin <= $slotMin + 4;
+        };
+
+        $weekdaySlot = in_array($dow, [1,2,3,4,7], true) && $inWindow($timeWeekday);
+        $weekendSlot = in_array($dow, [5,6], true)       && $inWindow($timeWeekend);
 
         if (!$weekdaySlot && !$weekendSlot) return;
 
