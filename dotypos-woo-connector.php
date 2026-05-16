@@ -58,7 +58,8 @@ final class Dotypos_Woo_Connector {
             // Daily report SMS
             'daily_report_enabled'               => 'no',
             'daily_report_phone'                 => '',
-            'daily_report_smsapi_token'          => '',
+            'daily_report_clicksend_username'    => '',
+            'daily_report_clicksend_api_key'     => '',
             'daily_report_sms_sender'            => '',
             'daily_report_card_payment_method_id'=> '900000002',
             'daily_report_pizza_category_id'     => '1871188158721371',
@@ -152,12 +153,13 @@ final class Dotypos_Woo_Connector {
 
         // Daily report settings section
         add_settings_section('dwco_daily_report', 'Raport dzienny SMS', function () {
-            echo '<p>Automatyczny raport dzienny ze sprzedaży (SALA + OGRÓD) wysyłany przez SMSAPI. Harmonogram: pn–czw, nd o 22:40; pt–sb o 23:40.</p>';
+            echo '<p>Automatyczny raport dzienny ze sprzedaży (SALA + OGRÓD) wysyłany przez ClickSend. Harmonogram: pn–czw, nd o 22:40; pt–sb o 23:40.</p>';
         }, 'dwco');
 
         add_settings_field('daily_report_enabled', 'Włącz raport SMS', [__CLASS__, 'field_yesno'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_enabled']);
-        add_settings_field('daily_report_phone', 'Numer telefonu', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_phone', 'placeholder' => 'np. 48500000000']);
-        add_settings_field('daily_report_smsapi_token', 'SMSAPI token', [__CLASS__, 'field_password'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_smsapi_token', 'placeholder' => '••••••••']);
+        add_settings_field('daily_report_phone', 'Numer telefonu', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_phone', 'placeholder' => 'np. +48500000000']);
+        add_settings_field('daily_report_clicksend_username', 'ClickSend username', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_clicksend_username', 'placeholder' => 'np. jan@example.com']);
+        add_settings_field('daily_report_clicksend_api_key', 'ClickSend API key', [__CLASS__, 'field_password'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_clicksend_api_key', 'placeholder' => '••••••••']);
         add_settings_field('daily_report_sms_sender', 'Nadawca SMS', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_sms_sender', 'placeholder' => 'np. MAMMAROSA']);
         add_settings_field('daily_report_branch_sala_id', 'Branch ID SALA', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_branch_sala_id', 'placeholder' => '146005859']);
         add_settings_field('daily_report_branch_ogrod_id', 'Branch ID OGRÓD', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_branch_ogrod_id', 'placeholder' => '150149839']);
@@ -182,7 +184,7 @@ final class Dotypos_Woo_Connector {
         foreach ($keys as $k) {
             if (!isset($input[$k])) continue;
             $v = $input[$k];
-            if (in_array($k, ['client_secret', 'refresh_token', 'daily_report_smsapi_token'], true)) {
+            if (in_array($k, ['client_secret', 'refresh_token', 'daily_report_clicksend_api_key'], true)) {
                 // allow empty to keep previous
                 $v = is_string($v) ? trim($v) : '';
                 if ($v === '') continue;
@@ -1967,38 +1969,41 @@ final class Dotypos_Woo_Connector {
     }
 
     private static function send_smsapi_sms(string $message): array {
-        $opts   = self::get_options();
-        $token  = trim($opts['daily_report_smsapi_token'] ?? '');
-        $phone  = trim($opts['daily_report_phone'] ?? '');
-        $sender = trim($opts['daily_report_sms_sender'] ?? '');
+        $opts     = self::get_options();
+        $username = trim($opts['daily_report_clicksend_username'] ?? '');
+        $apiKey   = trim($opts['daily_report_clicksend_api_key'] ?? '');
+        $phone    = trim($opts['daily_report_phone'] ?? '');
+        $sender   = trim($opts['daily_report_sms_sender'] ?? '');
 
-        if ($token === '') throw new Exception('Brak SMSAPI token w ustawieniach.');
-        if ($phone === '') throw new Exception('Brak numeru telefonu w ustawieniach.');
+        if ($username === '') throw new Exception('Brak ClickSend username w ustawieniach.');
+        if ($apiKey === '')   throw new Exception('Brak ClickSend API key w ustawieniach.');
+        if ($phone === '')    throw new Exception('Brak numeru telefonu w ustawieniach.');
 
-        $params = [
-            'to'      => $phone,
-            'message' => $message,
-            'format'  => 'json',
-        ];
+        $msg = ['to' => $phone, 'body' => $message];
         if ($sender !== '') {
-            $params['from'] = $sender;
+            $msg['from'] = $sender;
         }
 
-        $resp = wp_remote_post('https://api.smsapi.pl/sms.do', [
+        $resp = wp_remote_post('https://rest.clicksend.com/v3/sms/send', [
             'headers' => [
-                'Authorization' => 'Bearer ' . $token,
+                'Authorization' => 'Basic ' . base64_encode($username . ':' . $apiKey),
+                'Content-Type'  => 'application/json',
             ],
-            'body'    => $params,
+            'body'    => wp_json_encode(['messages' => [$msg]]),
             'timeout' => 20,
         ]);
 
         if (is_wp_error($resp)) {
-            throw new Exception('SMSAPI request failed: ' . $resp->get_error_message());
+            throw new Exception('ClickSend request failed: ' . $resp->get_error_message());
         }
 
         $code = wp_remote_retrieve_response_code($resp);
         $raw  = wp_remote_retrieve_body($resp);
         $json = json_decode($raw, true);
+
+        if ($code !== 200 || ($json['response_code'] ?? '') !== 'SUCCESS') {
+            throw new Exception('ClickSend error: HTTP ' . $code . ' | ' . $raw);
+        }
 
         return ['http' => $code, 'raw' => $raw, 'json' => $json];
     }
