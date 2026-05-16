@@ -208,7 +208,7 @@ final class Dotypos_Woo_Connector {
         $ph = esc_attr($args['placeholder'] ?? '');
         echo "<input type='password' class='regular-text' name='".self::OPT_KEY."[$key]' value='$val' placeholder='$ph' autocomplete='new-password' />";
         if ($key === 'refresh_token' && !empty($opts['refresh_token'])) {
-            echo "<p class='description'>Token zapisany. Mo\u{017C}esz klikn\u{0105}\u{0107} &bdquo;Test po\u{0142}\u{0105}czenia&rdquo;.</p>";
+            echo '<p class="description">Token zapisany. Mo&#380;esz klikn&#261;&#263; &bdquo;Test po&#322;&#261;czenia&rdquo;.</p>';
         }
     }
     public static function field_yesno($args) {
@@ -286,7 +286,7 @@ final class Dotypos_Woo_Connector {
             echo "</form>";
 
             echo "<hr><h2>Customizations (dodatki pod produktem)</h2>";
-            echo "<p>To musi by\u{0107} <strong>productCustomizationId</strong> (encja Product Customization), kt\u{00F3}rego wymaga <code>pos-actions order/create</code>. Je\u{015B}li wkleisz z\u{0142}e ID (np. z UI), POS zwr\u{00F3}ci b\u{0142}\u{0105}d 10001 &bdquo;not found&rdquo;.</p>";
+            echo '<p>To musi by&#263; <strong>productCustomizationId</strong> (encja Product Customization), kt&#243;rego wymaga <code>pos-actions order/create</code>. Je&#347;li wkleisz z&#322;e ID (np. z UI), POS zwr&#243;ci b&#322;&#261;d 10001 &bdquo;not found&rdquo;.</p>';
             echo "<form method='post' action='".esc_url(admin_url('admin-post.php'))."' style='display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;'>";
             echo "<input type='hidden' name='action' value='dwco_list_customizations' />";
             wp_nonce_field('dwco_list_customizations');
@@ -1852,7 +1852,7 @@ final class Dotypos_Woo_Connector {
 
         try {
             $summary = get_transient('dwco_last_daily_report_summary');
-            if (!$summary) throw new Exception('Brak ostatniego raportu. Najpierw wygeneruj raport przyciskiem „Policz raport testowo".');
+            if (!$summary) throw new Exception('Brak ostatniego raportu. Najpierw wygeneruj raport przyciskiem "Policz raport testowo".');
 
             $result = self::send_smsapi_sms((string)$summary);
 
