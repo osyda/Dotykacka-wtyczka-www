@@ -1889,13 +1889,11 @@ final class Dotypos_Woo_Connector {
     }
 
     private static function mm_money(float $amount): string {
-        return number_format($amount, 2, ',', '') . ' zł';
+        return (string)(int)round($amount);
     }
 
     private static function mm_qty($qty): string {
-        $f = (float)$qty;
-        if ($f == (int)$f) return (string)(int)$f;
-        return number_format($f, 1, ',', '');
+        return (string)(int)round((float)$qty);
     }
 
     private static function build_daily_report_summary(string $date, array $salaJson, array $ogrodJson): string {
@@ -1959,12 +1957,12 @@ final class Dotypos_Woo_Connector {
 
         return implode("\n", [
             "MM - {$dateFormatted}",
-            "Utarg: " . self::mm_money($total),
+            self::mm_money($total),
             "S: " . self::mm_money($s),
             "O: " . self::mm_money($o),
             "W: " . self::mm_money($w),
             "T: " . self::mm_money($t),
-            "PIZZA: " . self::mm_qty($pizzaCount) . " szt.",
+            "PIZZA: " . self::mm_qty($pizzaCount),
         ]);
     }
 
