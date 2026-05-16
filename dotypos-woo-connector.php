@@ -60,6 +60,7 @@ final class Dotypos_Woo_Connector {
             'daily_report_phone'                 => '',
             'daily_report_clicksend_username'    => '',
             'daily_report_clicksend_api_key'     => '',
+            'daily_report_cron_secret'           => '',
             'daily_report_sms_sender'            => '',
             'daily_report_time_weekday'          => '22:40',
             'daily_report_time_weekend'          => '23:40',
@@ -180,6 +181,34 @@ final class Dotypos_Woo_Connector {
         add_action('admin_post_dwco_check_customization_id', [__CLASS__, 'handle_check_customization_id']);
         add_action('admin_post_dwco_test_daily_report', [__CLASS__, 'handle_test_daily_report']);
         add_action('admin_post_dwco_send_last_daily_report_sms', [__CLASS__, 'handle_send_last_daily_report_sms']);
+
+        // Public cron trigger endpoint (no login required)
+        add_action('wp_ajax_nopriv_dwco_cron_ping', [__CLASS__, 'handle_cron_ping']);
+        add_action('wp_ajax_dwco_cron_ping',        [__CLASS__, 'handle_cron_ping']);
+
+        // Ensure cron secret exists
+        self::maybe_init_cron_secret();
+    }
+
+    private static function maybe_init_cron_secret(): void {
+        $opts = self::get_options();
+        if (empty($opts['daily_report_cron_secret'])) {
+            $opts['daily_report_cron_secret'] = wp_generate_password(32, false);
+            update_option(self::OPT_KEY, $opts);
+        }
+    }
+
+    public static function handle_cron_ping(): void {
+        $opts   = self::get_options();
+        $secret = trim($opts['daily_report_cron_secret'] ?? '');
+        $key    = isset($_GET['key']) ? sanitize_text_field($_GET['key']) : '';
+
+        if ($secret === '' || !hash_equals($secret, $key)) {
+            wp_die('Forbidden', '', ['response' => 403]);
+        }
+
+        do_action('dwco_daily_report_cron_check');
+        wp_send_json(['ok' => true]);
     }
 
     public static function sanitize_options($input) {
@@ -359,6 +388,16 @@ final class Dotypos_Woo_Connector {
             // ---- Daily report section ----
             echo "<hr><h2>Raport dzienny Dotykačka</h2>";
             echo "<p>Pobiera raport sprzedaży z obu branchy (SALA + OGRÓD) i buduje podsumowanie.</p>";
+
+            $cronOpts   = self::get_options();
+            $cronSecret = $cronOpts['daily_report_cron_secret'] ?? '';
+            if ($cronSecret) {
+                $cronUrl = admin_url('admin-ajax.php') . '?action=dwco_cron_ping&key=' . urlencode($cronSecret);
+                echo "<div style='background:#e7f5fe;border:1px solid #7eb4d5;padding:12px 16px;border-radius:4px;margin-bottom:16px;'>";
+                echo "<strong>URL do zewnętrznego crona</strong> — skopiuj ten adres do serwisu <a href='https://cron-job.org' target='_blank'>cron-job.org</a> (darmowy) lub dodaj do crontaba serwera. Ustaw wywołanie co <strong>1 minutę</strong> — wtyczka sama sprawdzi czy czas wysyłki już minął.<br><br>";
+                echo "<input type='text' value='".esc_attr($cronUrl)."' readonly style='width:100%;font-family:monospace;font-size:12px;' onclick='this.select();' />";
+                echo "</div>";
+            }
             echo "<form method='post' action='".esc_url(admin_url('admin-post.php'))."'>";
             echo "<input type='hidden' name='action' value='dwco_test_daily_report' />";
             wp_nonce_field('dwco_test_daily_report');
