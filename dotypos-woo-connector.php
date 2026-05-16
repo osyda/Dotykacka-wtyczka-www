@@ -2029,15 +2029,15 @@ final class Dotypos_Woo_Connector {
         $timeWeekday = trim($opts['daily_report_time_weekday'] ?? '22:40');
         $timeWeekend = trim($opts['daily_report_time_weekend'] ?? '23:40');
 
-        $inWindow = static function (string $hhmm) use ($hour, $minute): bool {
+        $isPastTarget = static function (string $hhmm) use ($hour, $minute): bool {
             [$h, $m] = array_map('intval', explode(':', $hhmm));
             $nowMin  = $hour * 60 + $minute;
             $slotMin = $h * 60 + $m;
-            return $nowMin >= $slotMin && $nowMin <= $slotMin + 4;
+            return $nowMin >= $slotMin && $nowMin <= $slotMin + 120; // do 2h po ustawionej godzinie
         };
 
-        $weekdaySlot = in_array($dow, [1,2,3,4,7], true) && $inWindow($timeWeekday);
-        $weekendSlot = in_array($dow, [5,6], true)       && $inWindow($timeWeekend);
+        $weekdaySlot = in_array($dow, [1,2,3,4,7], true) && $isPastTarget($timeWeekday);
+        $weekendSlot = in_array($dow, [5,6], true)       && $isPastTarget($timeWeekend);
 
         if (!$weekdaySlot && !$weekendSlot) return;
 
