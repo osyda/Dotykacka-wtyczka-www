@@ -368,6 +368,13 @@ final class Dotypos_Woo_Connector {
                 wp_nonce_field('dwco_send_last_daily_report_sms');
                 submit_button('Wyślij ostatni raport SMS testowo', 'secondary', 'submit', false);
                 echo "</form>";
+
+                $debugJson = get_transient('dwco_last_daily_report_debug');
+                if ($debugJson) {
+                    echo "<details style='margin-top:16px;'><summary style='cursor:pointer;font-weight:600;'>🔍 Debug: surowy JSON z API (kliknij aby rozwinąć)</summary>";
+                    echo "<pre style='background:#fff3cd;border:1px solid #ffc107;padding:12px;border-radius:4px;font-size:11px;line-height:1.4;overflow:auto;max-height:500px;'>".esc_html(json_encode($debugJson, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE))."</pre>";
+                    echo "</details>";
+                }
             }
         }
 
@@ -1830,12 +1837,15 @@ final class Dotypos_Woo_Connector {
             $summary = self::build_daily_report_summary($dateFrom, $salaJson, $ogrodJson);
 
             self::log('info', 'DAILY REPORT SUMMARY', [
-                'dateFrom' => $dateFrom,
-                'dateTo'   => $dateTo,
-                'summary'  => $summary,
+                'dateFrom'  => $dateFrom,
+                'dateTo'    => $dateTo,
+                'summary'   => $summary,
+                'salaJson'  => $salaJson,
+                'ogrodJson' => $ogrodJson,
             ]);
 
             set_transient('dwco_last_daily_report_summary', $summary, 10 * MINUTE_IN_SECONDS);
+            set_transient('dwco_last_daily_report_debug', ['sala' => $salaJson, 'ogrod' => $ogrodJson], 10 * MINUTE_IN_SECONDS);
 
             wp_redirect(admin_url('admin.php?page=dwco&tab=diagnostics&dwco_msg='.rawurlencode('Raport wygenerowany. Zobacz poniżej.')));
             exit;
