@@ -393,8 +393,16 @@ final class Dotypos_Woo_Connector {
             $cronSecret = $cronOpts['daily_report_cron_secret'] ?? '';
             if ($cronSecret) {
                 $cronUrl = admin_url('admin-ajax.php') . '?action=dwco_cron_ping&key=' . urlencode($cronSecret);
+                $timeWeekday = esc_html($cronOpts['daily_report_time_weekday'] ?? '22:40');
+                $timeWeekend = esc_html($cronOpts['daily_report_time_weekend'] ?? '23:40');
                 echo "<div style='background:#e7f5fe;border:1px solid #7eb4d5;padding:12px 16px;border-radius:4px;margin-bottom:16px;'>";
-                echo "<strong>URL do zewnętrznego crona</strong> — skopiuj ten adres do serwisu <a href='https://cron-job.org' target='_blank'>cron-job.org</a> (darmowy) lub dodaj do crontaba serwera. Ustaw wywołanie co <strong>1 minutę</strong> — wtyczka sama sprawdzi czy czas wysyłki już minął.<br><br>";
+                echo "<strong>URL do zewnętrznego crona</strong><br>";
+                echo "Skopiuj adres poniżej i dodaj go w <a href='https://cron-job.org' target='_blank'>cron-job.org</a> (darmowy) jako <strong>dwa oddzielne zadania</strong>:<br>";
+                echo "<ul style='margin:8px 0 8px 16px;'>";
+                echo "<li><strong>Zadanie 1</strong> — godzina <code>{$timeWeekday}</code>, dni: poniedziałek, wtorek, środa, czwartek, niedziela</li>";
+                echo "<li><strong>Zadanie 2</strong> — godzina <code>{$timeWeekend}</code>, dni: piątek, sobota</li>";
+                echo "</ul>";
+                echo "Każde zadanie wywołuje URL <strong>raz o wyznaczonej godzinie</strong>. Wtyczka wyśle SMS i zablokuje ponowne wysłanie tego samego dnia.<br><br>";
                 echo "<input type='text' value='".esc_attr($cronUrl)."' readonly style='width:100%;font-family:monospace;font-size:12px;' onclick='this.select();' />";
                 echo "</div>";
             }
@@ -2059,27 +2067,8 @@ final class Dotypos_Woo_Connector {
         $opts = self::get_options();
         if (($opts['daily_report_enabled'] ?? 'no') !== 'yes') return;
 
-        $tz     = wp_timezone();
-        $now    = new DateTime('now', $tz);
-        $dow    = (int)$now->format('N'); // 1=Mon … 7=Sun
-        $hour   = (int)$now->format('H');
-        $minute = (int)$now->format('i');
-
-        $timeWeekday = trim($opts['daily_report_time_weekday'] ?? '22:40');
-        $timeWeekend = trim($opts['daily_report_time_weekend'] ?? '23:40');
-
-        $isPastTarget = static function (string $hhmm) use ($hour, $minute): bool {
-            [$h, $m] = array_map('intval', explode(':', $hhmm));
-            $nowMin  = $hour * 60 + $minute;
-            $slotMin = $h * 60 + $m;
-            return $nowMin >= $slotMin && $nowMin <= $slotMin + 120; // do 2h po ustawionej godzinie
-        };
-
-        $weekdaySlot = in_array($dow, [1,2,3,4,7], true) && $isPastTarget($timeWeekday);
-        $weekendSlot = in_array($dow, [5,6], true)       && $isPastTarget($timeWeekend);
-
-        if (!$weekdaySlot && !$weekendSlot) return;
-
+        $tz       = wp_timezone();
+        $now      = new DateTime('now', $tz);
         $dateFrom = $now->format('Y-m-d');
 
         // Guard against double send on same day
