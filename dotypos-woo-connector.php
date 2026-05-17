@@ -2067,8 +2067,29 @@ final class Dotypos_Woo_Connector {
         $opts = self::get_options();
         if (($opts['daily_report_enabled'] ?? 'no') !== 'yes') return;
 
-        $tz       = wp_timezone();
-        $now      = new DateTime('now', $tz);
+        $tz     = wp_timezone();
+        $now    = new DateTime('now', $tz);
+        $dow    = (int)$now->format('N'); // 1=Mon…7=Sun
+        $hour   = (int)$now->format('H');
+        $minute = (int)$now->format('i');
+
+        $timeWeekday = trim($opts['daily_report_time_weekday'] ?? '22:40');
+        $timeWeekend = trim($opts['daily_report_time_weekend'] ?? '23:40');
+
+        $inWindow = static function (string $hhmm) use ($hour, $minute): bool {
+            [$h, $m] = array_map('intval', explode(':', $hhmm));
+            $nowMin  = $hour * 60 + $minute;
+            $slotMin = $h * 60 + $m;
+            return $nowMin >= $slotMin && $nowMin <= $slotMin + 10;
+        };
+
+        $isWeekday = in_array($dow, [1,2,3,4,7], true);
+        $isWeekend = in_array($dow, [5,6], true);
+
+        if ($isWeekday && !$inWindow($timeWeekday)) return;
+        if ($isWeekend && !$inWindow($timeWeekend)) return;
+        if (!$isWeekday && !$isWeekend) return;
+
         $dateFrom = $now->format('Y-m-d');
 
         // Guard against double send on same day
