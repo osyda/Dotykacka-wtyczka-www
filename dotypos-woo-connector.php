@@ -57,9 +57,18 @@ final class Dotypos_Woo_Connector {
             'etag_categories' => '',
             // Daily report
             'daily_report_enabled'               => 'no',
+            // SMS via SMSAPI.pl
+            'daily_report_sms_enabled'           => 'no',
             'daily_report_phone'                 => '',
-            'daily_report_clicksend_username'     => '',
-            'daily_report_clicksend_api_key'      => '',
+            'daily_report_smsapi_token'          => '',
+            'daily_report_sms_sender'            => 'MAMMAROSA',
+            // Telegram
+            'daily_report_telegram_enabled'      => 'no',
+            'daily_report_telegram_bot_token'    => '',
+            'daily_report_telegram_chat_id'      => '',
+            // Email
+            'daily_report_email_enabled'         => 'no',
+            'daily_report_email_to'              => '',
             'daily_report_cron_secret'           => '',
             'daily_report_time_weekday'          => '22:40',
             'daily_report_time_weekend'          => '23:40',
@@ -154,19 +163,41 @@ final class Dotypos_Woo_Connector {
         add_settings_field('sync_exclude_delivery_products', 'Nie importuj produktów DOWÓZ', [__CLASS__, 'field_yesno'], 'dwco', 'dwco_main', ['key' => 'sync_exclude_delivery_products']);
 
         // Daily report settings section
-        add_settings_section('dwco_daily_report', 'Raport dzienny SMS', function () {
-            echo '<p>Automatyczny raport dzienny ze sprzedaży (SALA + OGRÓD) wysyłany przez <strong>WhatsApp</strong> (CallMeBot). Godziny wysyłki konfigurujesz poniżej.</p>';
+        add_settings_section('dwco_daily_report', 'Raport dzienny', function () {
+            echo '<p>Automatyczny raport dzienny ze sprzedaży (SALA + OGRÓD). Możesz włączyć jeden lub więcej kanałów — SMS, Telegram, e-mail. Godziny wysyłki konfigurujesz poniżej.</p>';
         }, 'dwco');
 
-        add_settings_field('daily_report_enabled', 'Włącz raport SMS', [__CLASS__, 'field_yesno'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_enabled']);
-        add_settings_field('daily_report_phone', 'Numer telefonu', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_phone', 'placeholder' => 'np. +48500000000']);
-        add_settings_field('daily_report_clicksend_username', 'ClickSend username', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_clicksend_username', 'placeholder' => 'np. jan@example.com']);
-        add_settings_field('daily_report_clicksend_api_key', 'ClickSend API key', [__CLASS__, 'field_password'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_clicksend_api_key', 'placeholder' => '••••••••']);
-        add_settings_field('daily_report_sms_sender', 'Nadawca SMS', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_sms_sender', 'placeholder' => 'np. MAMMAROSA']);
+        add_settings_field('daily_report_enabled', 'Włącz raport dzienny', [__CLASS__, 'field_yesno'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_enabled']);
         add_settings_field('daily_report_time_weekday', 'Godzina wysyłki pn–czw, nd', [__CLASS__, 'field_time'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_time_weekday']);
         add_settings_field('daily_report_time_weekend', 'Godzina wysyłki pt–sb', [__CLASS__, 'field_time'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_time_weekend']);
         add_settings_field('daily_report_branch_sala_id', 'Branch ID SALA', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_branch_sala_id', 'placeholder' => '146005859']);
         add_settings_field('daily_report_branch_ogrod_id', 'Branch ID OGRÓD', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_branch_ogrod_id', 'placeholder' => '150149839']);
+        add_settings_field('daily_report_card_payment_method_id', 'Payment method ID karta', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_card_payment_method_id', 'placeholder' => '900000002']);
+        add_settings_field('daily_report_pizza_category_id', 'Category ID PIZZA', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_pizza_category_id', 'placeholder' => '1871188158721371']);
+
+        // SMS channel
+        add_settings_section('dwco_daily_report_sms', 'Kanał 1: SMS (SMSAPI.pl)', function () {
+            echo '<p>Wysyłka SMS przez <strong>SMSAPI.pl</strong>. Token OAuth znajdziesz w panelu SMSAPI → API → Token.</p>';
+        }, 'dwco');
+        add_settings_field('daily_report_sms_enabled', 'Włącz SMS', [__CLASS__, 'field_yesno'], 'dwco', 'dwco_daily_report_sms', ['key' => 'daily_report_sms_enabled']);
+        add_settings_field('daily_report_phone', 'Numer telefonu', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report_sms', ['key' => 'daily_report_phone', 'placeholder' => 'np. +48500000000']);
+        add_settings_field('daily_report_smsapi_token', 'SMSAPI Token', [__CLASS__, 'field_password'], 'dwco', 'dwco_daily_report_sms', ['key' => 'daily_report_smsapi_token', 'placeholder' => '••••••••']);
+        add_settings_field('daily_report_sms_sender', 'Nadawca SMS', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report_sms', ['key' => 'daily_report_sms_sender', 'placeholder' => 'np. MAMMAROSA']);
+
+        // Telegram channel
+        add_settings_section('dwco_daily_report_telegram', 'Kanał 2: Telegram', function () {
+            echo '<p>Wysyłka przez <strong>Telegram Bot API</strong>. Utwórz bota przez @BotFather, Chat ID możesz sprawdzić przez @userinfobot.</p>';
+        }, 'dwco');
+        add_settings_field('daily_report_telegram_enabled', 'Włącz Telegram', [__CLASS__, 'field_yesno'], 'dwco', 'dwco_daily_report_telegram', ['key' => 'daily_report_telegram_enabled']);
+        add_settings_field('daily_report_telegram_bot_token', 'Bot Token', [__CLASS__, 'field_password'], 'dwco', 'dwco_daily_report_telegram', ['key' => 'daily_report_telegram_bot_token', 'placeholder' => '••••••••']);
+        add_settings_field('daily_report_telegram_chat_id', 'Chat ID', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report_telegram', ['key' => 'daily_report_telegram_chat_id', 'placeholder' => 'np. -100123456789']);
+
+        // Email channel
+        add_settings_section('dwco_daily_report_email', 'Kanał 3: E-mail', function () {
+            echo '<p>Wysyłka e-maila przez WordPress (<code>wp_mail</code>). Adres nadawcy = adres admina WordPress.</p>';
+        }, 'dwco');
+        add_settings_field('daily_report_email_enabled', 'Włącz e-mail', [__CLASS__, 'field_yesno'], 'dwco', 'dwco_daily_report_email', ['key' => 'daily_report_email_enabled']);
+        add_settings_field('daily_report_email_to', 'Adres e-mail', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report_email', ['key' => 'daily_report_email_to', 'placeholder' => 'np. wlasciciel@restauracja.pl']);
         add_settings_field('daily_report_card_payment_method_id', 'Payment method ID karta', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_card_payment_method_id', 'placeholder' => '900000002']);
         add_settings_field('daily_report_pizza_category_id', 'Category ID PIZZA', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_pizza_category_id', 'placeholder' => '1871188158721371']);
 
@@ -217,7 +248,7 @@ final class Dotypos_Woo_Connector {
         foreach ($keys as $k) {
             if (!isset($input[$k])) continue;
             $v = $input[$k];
-            if (in_array($k, ['client_secret', 'refresh_token', 'daily_report_clicksend_api_key'], true)) {
+            if (in_array($k, ['client_secret', 'refresh_token', 'daily_report_smsapi_token', 'daily_report_telegram_bot_token'], true)) {
                 // allow empty to keep previous
                 $v = is_string($v) ? trim($v) : '';
                 if ($v === '') continue;
@@ -2156,15 +2187,17 @@ final class Dotypos_Woo_Connector {
             $summary = get_transient('dwco_last_daily_report_summary');
             if (!$summary) throw new Exception('Brak ostatniego raportu. Najpierw wygeneruj raport przyciskiem "Policz raport testowo".');
 
-            $result = self::send_smsapi_sms((string)$summary);
+            $results = self::send_daily_report_all_channels((string)$summary);
 
-            self::log('info', 'DAILY REPORT SMS SENT', [
-                'http' => $result['http'],
-                'raw'  => $result['raw'],
-                'json' => $result['json'],
-            ]);
+            self::log('info', 'DAILY REPORT TEST SEND', ['channels' => $results]);
 
-            wp_redirect(admin_url('admin.php?page=dwco&tab=diagnostics&dwco_msg='.rawurlencode('SMS wysłany. HTTP: '.$result['http'])));
+            $parts = [];
+            foreach ($results as $ch => $r) {
+                $parts[] = strtoupper($ch) . ': ' . ($r['ok'] ? 'OK' : ('BŁĄD: ' . ($r['error'] ?? '?')));
+            }
+            $msg = empty($parts) ? 'Żaden kanał nie jest włączony.' : implode(' | ', $parts);
+
+            wp_redirect(admin_url('admin.php?page=dwco&tab=diagnostics&dwco_msg='.rawurlencode($msg)));
             exit;
         } catch (Exception $e) {
             self::log('error', 'Daily report SMS failed', ['ex' => $e->getMessage()]);
@@ -2256,44 +2289,121 @@ final class Dotypos_Woo_Connector {
         ]);
     }
 
-    private static function send_smsapi_sms(string $message): array {
-        $opts     = self::get_options();
-        $username = trim($opts['daily_report_clicksend_username'] ?? '');
-        $apiKey   = trim($opts['daily_report_clicksend_api_key'] ?? '');
-        $phone    = trim($opts['daily_report_phone'] ?? '');
-        $sender   = trim($opts['daily_report_sms_sender'] ?? '');
+    private static function send_via_smsapi(string $message): array {
+        $opts   = self::get_options();
+        $token  = trim($opts['daily_report_smsapi_token'] ?? '');
+        $phone  = trim($opts['daily_report_phone'] ?? '');
+        $sender = trim($opts['daily_report_sms_sender'] ?? '');
 
-        if ($username === '') throw new Exception('Brak ClickSend username w ustawieniach.');
-        if ($apiKey === '')   throw new Exception('Brak ClickSend API key w ustawieniach.');
-        if ($phone === '')    throw new Exception('Brak numeru telefonu w ustawieniach.');
+        if ($token === '') throw new Exception('Brak SMSAPI token w ustawieniach.');
+        if ($phone === '') throw new Exception('Brak numeru telefonu w ustawieniach.');
 
-        $msg = ['to' => $phone, 'body' => $message];
-        if ($sender !== '') {
-            $msg['from'] = $sender;
-        }
+        $body = ['to' => $phone, 'message' => $message, 'encoding' => 'utf-8'];
+        if ($sender !== '') $body['from'] = $sender;
 
-        $resp = wp_remote_post('https://rest.clicksend.com/v3/sms/send', [
+        $resp = wp_remote_post('https://api.smsapi.pl/sms.do', [
             'headers' => [
-                'Authorization' => 'Basic ' . base64_encode($username . ':' . $apiKey),
-                'Content-Type'  => 'application/json',
+                'Authorization' => 'Bearer ' . $token,
+                'Content-Type'  => 'application/x-www-form-urlencoded',
             ],
-            'body'    => wp_json_encode(['messages' => [$msg]]),
+            'body'    => http_build_query($body),
             'timeout' => 20,
         ]);
 
-        if (is_wp_error($resp)) {
-            throw new Exception('ClickSend request failed: ' . $resp->get_error_message());
-        }
+        if (is_wp_error($resp)) throw new Exception('SMSAPI request failed: ' . $resp->get_error_message());
 
         $code = wp_remote_retrieve_response_code($resp);
         $raw  = wp_remote_retrieve_body($resp);
         $json = json_decode($raw, true);
 
-        if ($code !== 200 || ($json['response_code'] ?? '') !== 'SUCCESS') {
-            throw new Exception('ClickSend error: HTTP ' . $code . ' | ' . $raw);
+        if ($code !== 200 && $code !== 201) {
+            throw new Exception('SMSAPI error: HTTP ' . $code . ' | ' . $raw);
         }
 
         return ['http' => $code, 'raw' => $raw, 'json' => $json];
+    }
+
+    private static function send_via_telegram(string $message): array {
+        $opts     = self::get_options();
+        $botToken = trim($opts['daily_report_telegram_bot_token'] ?? '');
+        $chatId   = trim($opts['daily_report_telegram_chat_id'] ?? '');
+
+        if ($botToken === '') throw new Exception('Brak Telegram bot token w ustawieniach.');
+        if ($chatId === '')   throw new Exception('Brak Telegram chat ID w ustawieniach.');
+
+        $url  = "https://api.telegram.org/bot{$botToken}/sendMessage";
+        $resp = wp_remote_post($url, [
+            'headers' => ['Content-Type' => 'application/json'],
+            'body'    => wp_json_encode(['chat_id' => $chatId, 'text' => $message]),
+            'timeout' => 20,
+        ]);
+
+        if (is_wp_error($resp)) throw new Exception('Telegram request failed: ' . $resp->get_error_message());
+
+        $code = wp_remote_retrieve_response_code($resp);
+        $raw  = wp_remote_retrieve_body($resp);
+        $json = json_decode($raw, true);
+
+        if ($code !== 200 || empty($json['ok'])) {
+            throw new Exception('Telegram error: HTTP ' . $code . ' | ' . $raw);
+        }
+
+        return ['http' => $code, 'raw' => $raw, 'json' => $json];
+    }
+
+    private static function send_via_email(string $message): array {
+        $opts    = self::get_options();
+        $emailTo = trim($opts['daily_report_email_to'] ?? '');
+
+        if ($emailTo === '') throw new Exception('Brak adresu e-mail w ustawieniach.');
+
+        $date    = current_time('d.m.Y');
+        $subject = "Raport dzienny MM – {$date}";
+        $body    = nl2br(esc_html($message));
+        $headers = ['Content-Type: text/html; charset=UTF-8'];
+
+        $ok = wp_mail($emailTo, $subject, $body, $headers);
+
+        if (!$ok) throw new Exception('wp_mail zwróciło false — sprawdź konfigurację SMTP.');
+
+        return ['http' => 200, 'raw' => 'ok', 'json' => null];
+    }
+
+    private static function send_daily_report_all_channels(string $summary): array {
+        $opts    = self::get_options();
+        $results = [];
+
+        if (($opts['daily_report_sms_enabled'] ?? 'no') === 'yes') {
+            try {
+                $r = self::send_via_smsapi($summary);
+                $results['sms'] = ['ok' => true, 'http' => $r['http']];
+            } catch (Exception $e) {
+                $results['sms'] = ['ok' => false, 'error' => $e->getMessage()];
+                self::log('error', 'Daily report SMS failed', ['ex' => $e->getMessage()]);
+            }
+        }
+
+        if (($opts['daily_report_telegram_enabled'] ?? 'no') === 'yes') {
+            try {
+                $r = self::send_via_telegram($summary);
+                $results['telegram'] = ['ok' => true, 'http' => $r['http']];
+            } catch (Exception $e) {
+                $results['telegram'] = ['ok' => false, 'error' => $e->getMessage()];
+                self::log('error', 'Daily report Telegram failed', ['ex' => $e->getMessage()]);
+            }
+        }
+
+        if (($opts['daily_report_email_enabled'] ?? 'no') === 'yes') {
+            try {
+                $r = self::send_via_email($summary);
+                $results['email'] = ['ok' => true, 'http' => $r['http']];
+            } catch (Exception $e) {
+                $results['email'] = ['ok' => false, 'error' => $e->getMessage()];
+                self::log('error', 'Daily report email failed', ['ex' => $e->getMessage()]);
+            }
+        }
+
+        return $results;
     }
 
     public static function maybe_send_scheduled_daily_report(): void {
@@ -2353,14 +2463,14 @@ final class Dotypos_Woo_Connector {
 
             set_transient('dwco_last_daily_report_summary', $summary, 60 * MINUTE_IN_SECONDS);
 
-            $smsResult = self::send_smsapi_sms($summary);
+            $channelResults = self::send_daily_report_all_channels($summary);
 
             update_option($guardKey, current_time('mysql'), false);
 
             self::log('info', 'DAILY REPORT SCHEDULED SENT', [
                 'dateFrom' => $dateFrom,
                 'summary'  => $summary,
-                'sms_http' => $smsResult['http'],
+                'channels' => $channelResults,
             ]);
         } catch (Exception $e) {
             self::log('error', 'Scheduled daily report failed', ['ex' => $e->getMessage()]);
