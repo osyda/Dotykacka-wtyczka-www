@@ -55,13 +55,11 @@ final class Dotypos_Woo_Connector {
             'sync_exclude_delivery_products' => 'yes',
             'etag_products' => '',
             'etag_categories' => '',
-            // Daily report SMS
+            // Daily report
             'daily_report_enabled'               => 'no',
             'daily_report_phone'                 => '',
-            'daily_report_clicksend_username'    => '',
-            'daily_report_clicksend_api_key'     => '',
+            'daily_report_callmebot_apikey'      => '',
             'daily_report_cron_secret'           => '',
-            'daily_report_sms_sender'            => '',
             'daily_report_time_weekday'          => '22:40',
             'daily_report_time_weekend'          => '23:40',
             'daily_report_card_payment_method_id'=> '900000002',
@@ -156,7 +154,7 @@ final class Dotypos_Woo_Connector {
 
         // Daily report settings section
         add_settings_section('dwco_daily_report', 'Raport dzienny SMS', function () {
-            echo '<p>Automatyczny raport dzienny ze sprzedaży (SALA + OGRÓD) wysyłany przez ClickSend. Godziny wysyłki konfigurujesz poniżej (okno ±4 minuty).</p>';
+            echo '<p>Automatyczny raport dzienny ze sprzedaży (SALA + OGRÓD) wysyłany przez <strong>WhatsApp</strong> (CallMeBot). Godziny wysyłki konfigurujesz poniżej.</p>';
         }, 'dwco');
 
         add_settings_field('daily_report_enabled', 'Włącz raport SMS', [__CLASS__, 'field_yesno'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_enabled']);
