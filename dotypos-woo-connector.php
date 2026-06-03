@@ -176,6 +176,7 @@ final class Dotypos_Woo_Connector {
         add_action('admin_post_dwco_clear_logs', [__CLASS__, 'handle_clear_logs']);
         add_action('admin_post_dwco_import_menu', [__CLASS__, 'handle_import_menu']);
         add_action('admin_post_dwco_sync_now', [__CLASS__, 'handle_sync_now']);
+        add_action('admin_post_dwco_add_selected_products', [__CLASS__, 'handle_add_selected_products']);
         add_action('admin_post_dwco_list_customizations', [__CLASS__, 'handle_list_customizations']);
         add_action('admin_post_dwco_check_customization_id', [__CLASS__, 'handle_check_customization_id']);
         add_action('admin_post_dwco_test_daily_report', [__CLASS__, 'handle_test_daily_report']);
@@ -461,21 +462,54 @@ final class Dotypos_Woo_Connector {
 
             echo "<p class='description'><strong>Synchronizuj teraz</strong> — aktualizuje TYLKO ceny istniejących produktów. Nie tworzy nowych, nie zmienia kategorii.</p>";
 
+            // --- NEW PRODUCTS (in Dotykacka, not in WC) ---
             $newProds = get_option('dwco_last_sync_new_products', []);
             if (!empty($newProds) && is_array($newProds)) {
                 echo "<div style='background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:12px 16px;margin:12px 0;'>";
-                echo "<strong>Nowe produkty w Dotykačce (nieobecne w WooCommerce):</strong>";
-                echo "<table style='border-collapse:collapse;margin-top:8px;width:100%;'>";
-                echo "<tr style='background:#ffc107;'><th style='padding:4px 8px;text-align:left;'>Nazwa</th><th style='padding:4px 8px;text-align:left;'>Kategoria</th><th style='padding:4px 8px;text-align:right;'>Cena</th></tr>";
-                foreach ($newProds as $np) {
+                echo "<strong style='font-size:14px;'>Nowe produkty w Dotykačce (nieobecne w WooCommerce):</strong>";
+                echo "<form method='post' action='".esc_url(admin_url('admin-post.php'))."' style='margin-top:8px;'>";
+                echo "<input type='hidden' name='action' value='dwco_add_selected_products' />";
+                wp_nonce_field('dwco_add_selected_products');
+                echo "<table style='border-collapse:collapse;width:100%;'>";
+                echo "<tr style='background:#ffc107;'>";
+                echo "<th style='padding:4px 8px;text-align:center;width:32px;'><input type='checkbox' id='dwco_check_all' title='Zaznacz wszystkie' /></th>";
+                echo "<th style='padding:4px 8px;text-align:left;'>Nazwa</th>";
+                echo "<th style='padding:4px 8px;text-align:left;'>Kategoria</th>";
+                echo "<th style='padding:4px 8px;text-align:right;'>Cena</th>";
+                echo "</tr>";
+                foreach ($newProds as $idx => $np) {
                     echo "<tr style='border-top:1px solid #ffc107;'>";
+                    echo "<td style='padding:4px 8px;text-align:center;'><input type='checkbox' name='new_prod_idx[]' value='".esc_attr($idx)."' class='dwco-new-prod-cb' /></td>";
                     echo "<td style='padding:4px 8px;'>".esc_html($np['name'])."</td>";
                     echo "<td style='padding:4px 8px;'>".esc_html($np['category'])."</td>";
                     echo "<td style='padding:4px 8px;text-align:right;'>".esc_html(number_format((float)$np['price'], 2, ',', ' '))." zł</td>";
                     echo "</tr>";
                 }
                 echo "</table>";
-                echo "<p style='margin:8px 0 0;font-size:12px;'>Jeśli chcesz dodać te produkty, użyj <strong>Importuj menu (pierwszy raz)</strong>.</p>";
+                echo "<div style='margin-top:8px;'>";
+                submit_button('Dodaj zaznaczone do WooCommerce', 'primary small', 'submit', false);
+                echo "</div>";
+                echo "</form>";
+                echo "<script>document.getElementById('dwco_check_all').addEventListener('change',function(){document.querySelectorAll('.dwco-new-prod-cb').forEach(function(cb){cb.checked=document.getElementById('dwco_check_all').checked;});});</script>";
+                echo "</div>";
+            }
+
+            // --- MISSING PRODUCTS (in WC but gone from Dotykacka) ---
+            $missingProds = get_option('dwco_last_sync_missing_products', []);
+            if (!empty($missingProds) && is_array($missingProds)) {
+                echo "<div style='background:#f8d7da;border:1px solid #f5c6cb;border-radius:4px;padding:12px 16px;margin:12px 0;'>";
+                echo "<strong style='font-size:14px;color:#721c24;'>Produkty nieobecne w Dotykačce (zniknęły z kasy):</strong>";
+                echo "<table style='border-collapse:collapse;margin-top:8px;width:100%;'>";
+                echo "<tr style='background:#f5c6cb;'><th style='padding:4px 8px;text-align:left;'>Nazwa (WooCommerce)</th><th style='padding:4px 8px;text-align:left;'>Dotypos ID</th><th style='padding:4px 8px;text-align:left;'>Akcja</th></tr>";
+                foreach ($missingProds as $mp) {
+                    echo "<tr style='border-top:1px solid #f5c6cb;'>";
+                    echo "<td style='padding:4px 8px;'>".esc_html($mp['name'])."</td>";
+                    echo "<td style='padding:4px 8px;font-family:monospace;'>".esc_html($mp['dotypos_id'])."</td>";
+                    echo "<td style='padding:4px 8px;'><a href='".esc_url($mp['edit_url'])."' target='_blank'>Edytuj w WC</a></td>";
+                    echo "</tr>";
+                }
+                echo "</table>";
+                echo "<p style='margin:8px 0 0;font-size:12px;color:#721c24;'>Te produkty istnieją w WooCommerce, ale nie ma ich w Dotykačce. Sprawdź czy zostały usunięte z kasy.</p>";
                 echo "</div>";
             }
 
@@ -1657,18 +1691,76 @@ final class Dotypos_Woo_Connector {
         check_admin_referer('dwco_sync_now');
         try {
             $res = self::sync_prices_only();
-            $msg = $res['summary'];
-            if (!empty($res['new_products'])) {
-                update_option('dwco_last_sync_new_products', $res['new_products'], false);
-            } else {
-                delete_option('dwco_last_sync_new_products');
-            }
-            wp_redirect(admin_url('admin.php?page=dwco&tab=sync&dwco_msg=' . rawurlencode($msg)));
+            update_option('dwco_last_sync_new_products',     $res['new_products'],     false);
+            update_option('dwco_last_sync_missing_products', $res['missing_products'], false);
+            wp_redirect(admin_url('admin.php?page=dwco&tab=sync&dwco_msg=' . rawurlencode($res['summary'])));
             exit;
         } catch (Exception $e) {
             wp_redirect(admin_url('admin.php?page=dwco&tab=sync&dwco_err=' . rawurlencode($e->getMessage())));
             exit;
         }
+    }
+
+    public static function handle_add_selected_products() {
+        if (!current_user_can('manage_options')) wp_die('Forbidden');
+        check_admin_referer('dwco_add_selected_products');
+
+        $selected = isset($_POST['new_prod_idx']) && is_array($_POST['new_prod_idx'])
+            ? array_map('intval', $_POST['new_prod_idx'])
+            : [];
+
+        if (empty($selected)) {
+            wp_redirect(admin_url('admin.php?page=dwco&tab=sync&dwco_err=' . rawurlencode('Nie zaznaczono żadnych produktów.')));
+            exit;
+        }
+
+        $allNew = get_option('dwco_last_sync_new_products', []);
+        if (!is_array($allNew)) $allNew = [];
+
+        $opts = self::get_options();
+        $added = 0;
+
+        foreach ($selected as $idx) {
+            if (!isset($allNew[$idx])) continue;
+            $np = $allNew[$idx];
+
+            $product = new WC_Product_Simple();
+            $product->set_name($np['name']);
+            $product->set_status('publish');
+            $product->set_catalog_visibility('visible');
+            $product->set_regular_price(wc_format_decimal((float)$np['price']));
+            $post_id = $product->save();
+
+            if ($post_id) {
+                update_post_meta($post_id, '_dwco_dotypos_product_id', (string)$np['dotypos_id']);
+                update_post_meta($post_id, '_dwco_dotypos_synced_at', time());
+
+                // assign WC category by dotypos category id
+                if (!empty($np['category_id'])) {
+                    $terms = get_terms([
+                        'taxonomy'   => 'product_cat',
+                        'hide_empty' => false,
+                        'meta_query' => [[
+                            'key'     => 'dwco_dotypos_category_id',
+                            'value'   => (string)$np['category_id'],
+                            'compare' => '=',
+                        ]],
+                        'fields' => 'ids',
+                    ]);
+                    if (!empty($terms) && !is_wp_error($terms)) {
+                        wp_set_object_terms($post_id, [(int)$terms[0]], 'product_cat', false);
+                    }
+                }
+                $added++;
+            }
+        }
+
+        // Remove added products from the stored list
+        foreach ($selected as $idx) unset($allNew[$idx]);
+        update_option('dwco_last_sync_new_products', array_values($allNew), false);
+
+        wp_redirect(admin_url('admin.php?page=dwco&tab=sync&dwco_msg=' . rawurlencode("Dodano produktów: $added")));
+        exit;
     }
 
     private static function sync_prices_only(): array {
@@ -1681,7 +1773,7 @@ final class Dotypos_Woo_Connector {
         $deliveryCityPid = (int)trim($opts['delivery_city_product_id'] ?? '');
         $deliveryKmPid   = (int)trim($opts['delivery_km_product_id'] ?? '');
 
-        // Fetch category names for reporting new products
+        // Fetch category names for reporting
         $cats = self::fetch_all_entities($cloudId, 'categories', true, 'etag_categories', 'dwco_cached_categories');
         $catNames = [];
         foreach ($cats as $c) {
@@ -1693,21 +1785,24 @@ final class Dotypos_Woo_Connector {
         $products = self::fetch_all_entities($cloudId, 'products', true, 'etag_products', 'dwco_cached_products');
 
         $updated = 0; $skipped = 0;
-        $newProducts = [];
+        $newProducts     = [];
+        $dotykackaIds    = [];  // all active dotypos IDs seen this sync
 
         foreach ($products as $p) {
-            if (!is_array($p)) { $skipped++; continue; }
-            if (!empty($p['deleted'])) { $skipped++; continue; }
-            if (isset($p['display']) && !$p['display']) { $skipped++; continue; }
+            if (!is_array($p)) continue;
+            if (!empty($p['deleted'])) continue;
+            if (isset($p['display']) && !$p['display']) continue;
 
             $pid = (int)($p['id'] ?? 0);
-            if ($pid <= 0) { $skipped++; continue; }
+            if ($pid <= 0) continue;
 
             if ($excludeDelivery) {
-                if ($pid === $deliveryCityPid || $pid === $deliveryKmPid) { $skipped++; continue; }
+                if ($pid === $deliveryCityPid || $pid === $deliveryKmPid) continue;
                 $nm = (string)($p['name'] ?? '');
-                if (stripos($nm, 'dowóz') !== false || stripos($nm, 'dowoz') !== false) { $skipped++; continue; }
+                if (stripos($nm, 'dowóz') !== false || stripos($nm, 'dowoz') !== false) continue;
             }
+
+            $dotykackaIds[] = $pid;
 
             $price = null;
             if (isset($p['priceWithVat'])) $price = (float)$p['priceWithVat'];
@@ -1717,12 +1812,13 @@ final class Dotypos_Woo_Connector {
             $post_id = self::find_product_by_dotypos_id($pid);
 
             if ($post_id <= 0) {
-                // New product in Dotykacka — report it, do NOT create
                 $catId = (int)($p['_categoryId'] ?? 0);
                 $newProducts[] = [
-                    'name'     => (string)($p['name'] ?? ('Produkt '.$pid)),
-                    'category' => $catId > 0 ? ($catNames[$catId] ?? ('Kategoria '.$catId)) : '—',
-                    'price'    => $price,
+                    'dotypos_id'  => $pid,
+                    'name'        => (string)($p['name'] ?? ('Produkt '.$pid)),
+                    'category'    => $catId > 0 ? ($catNames[$catId] ?? ('Kategoria '.$catId)) : '—',
+                    'category_id' => $catId,
+                    'price'       => $price,
                 ];
                 continue;
             }
@@ -1741,11 +1837,46 @@ final class Dotypos_Woo_Connector {
             }
         }
 
+        // Find WC products that have a dotypos_id no longer present in Dotykacka
+        $missingProducts = [];
+        if (!empty($dotykackaIds)) {
+            $wcWithIds = new WP_Query([
+                'post_type'      => 'product',
+                'post_status'    => 'any',
+                'posts_per_page' => -1,
+                'meta_query'     => [[
+                    'key'     => '_dwco_dotypos_product_id',
+                    'compare' => 'EXISTS',
+                ]],
+                'fields' => 'ids',
+            ]);
+            foreach ($wcWithIds->posts as $wcId) {
+                $storedDotId = (int)get_post_meta((int)$wcId, '_dwco_dotypos_product_id', true);
+                if ($storedDotId > 0 && !in_array($storedDotId, $dotykackaIds, true)) {
+                    $wcProd = wc_get_product((int)$wcId);
+                    if ($wcProd) {
+                        $missingProducts[] = [
+                            'wc_id'      => (int)$wcId,
+                            'name'       => $wcProd->get_name(),
+                            'dotypos_id' => $storedDotId,
+                            'edit_url'   => get_edit_post_link((int)$wcId, 'raw'),
+                        ];
+                    }
+                }
+            }
+        }
+
         $summary = sprintf(
-            "Ceny zaktualizowane: %d | Pominięte: %d | Nowe w Dotykačce (nie dodane): %d",
-            $updated, $skipped, count($newProducts)
+            "Ceny zaktualizowane: %d | Pominięte: %d | Nowe w Dotykačce: %d | Brak w Dotykačce: %d",
+            $updated, $skipped, count($newProducts), count($missingProducts)
         );
-        return ['summary' => $summary, 'updated' => $updated, 'skipped' => $skipped, 'new_products' => $newProducts];
+        return [
+            'summary'          => $summary,
+            'updated'          => $updated,
+            'skipped'          => $skipped,
+            'new_products'     => $newProducts,
+            'missing_products' => $missingProducts,
+        ];
     }
 
     private static function sync_menu(bool $is_import): array {
