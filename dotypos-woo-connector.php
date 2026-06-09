@@ -70,6 +70,11 @@ final class Dotypos_Woo_Connector {
             // Email
             'daily_report_email_enabled'         => 'no',
             'daily_report_email_to'              => '',
+            // SMS Gateway (InfiniReach) - SMS z własnego telefonu
+            'daily_report_smsgateway_enabled'    => 'no',
+            'daily_report_smsgateway_api_key'    => '',
+            'daily_report_smsgateway_from_phone' => '',
+            'daily_report_smsgateway_to_phone'   => '',
             'daily_report_cron_secret'           => '',
             'daily_report_time_weekday'          => '22:40',
             'daily_report_time_weekend'          => '23:40',
@@ -202,6 +207,15 @@ final class Dotypos_Woo_Connector {
         add_settings_field('daily_report_card_payment_method_id', 'Payment method ID karta', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_card_payment_method_id', 'placeholder' => '900000002']);
         add_settings_field('daily_report_pizza_category_id', 'Category ID PIZZA', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_pizza_category_id', 'placeholder' => '1871188158721371']);
 
+        // SMS Gateway channel (InfiniReach - SMS z własnego telefonu)
+        add_settings_section('dwco_daily_report_smsgateway', 'Kanał 4: SMS z telefonu (InfiniReach)', function () {
+            echo '<p>Wysyłka SMS bezpośrednio z Twojego telefonu (przez aplikację <strong>SMS Gateway for Android</strong> połączoną z <strong>InfiniReach</strong>). API Key znajdziesz w panelu InfiniReach.</p>';
+        }, 'dwco');
+        add_settings_field('daily_report_smsgateway_enabled', 'Włącz SMS z telefonu', [__CLASS__, 'field_yesno'], 'dwco', 'dwco_daily_report_smsgateway', ['key' => 'daily_report_smsgateway_enabled']);
+        add_settings_field('daily_report_smsgateway_api_key', 'InfiniReach API Key', [__CLASS__, 'field_password'], 'dwco', 'dwco_daily_report_smsgateway', ['key' => 'daily_report_smsgateway_api_key', 'placeholder' => '••••••••']);
+        add_settings_field('daily_report_smsgateway_from_phone', 'Numer telefonu nadawcy (Twój)', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report_smsgateway', ['key' => 'daily_report_smsgateway_from_phone', 'placeholder' => 'np. +48781647139']);
+        add_settings_field('daily_report_smsgateway_to_phone', 'Numer telefonu odbiorcy', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report_smsgateway', ['key' => 'daily_report_smsgateway_to_phone', 'placeholder' => 'np. +48500000000']);
+
         // Custom actions
         add_action('admin_post_dwco_connect', [__CLASS__, 'handle_admin_connect']);
         add_action('admin_post_dwco_test', [__CLASS__, 'handle_admin_test']);
@@ -251,7 +265,7 @@ final class Dotypos_Woo_Connector {
         foreach ($keys as $k) {
             if (!isset($input[$k])) continue;
             $v = $input[$k];
-            if (in_array($k, ['client_secret', 'refresh_token', 'daily_report_smsapi_token', 'daily_report_telegram_bot_token'], true)) {
+            if (in_array($k, ['client_secret', 'refresh_token', 'daily_report_smsapi_token', 'daily_report_telegram_bot_token', 'daily_report_smsgateway_api_key'], true)) {
                 // allow empty to keep previous
                 $v = is_string($v) ? trim($v) : '';
                 if ($v === '') continue;
@@ -2519,6 +2533,43 @@ final class Dotypos_Woo_Connector {
         return ['http' => 200, 'raw' => 'ok', 'json' => null];
     }
 
+    private static function send_via_smsgateway(string $message): array {
+        $opts    = self::get_options();
+        $apiKey  = trim($opts['daily_report_smsgateway_api_key'] ?? '');
+        $from    = trim($opts['daily_report_smsgateway_from_phone'] ?? '');
+        $to      = trim($opts['daily_report_smsgateway_to_phone'] ?? '');
+
+        if ($apiKey === '') throw new Exception('Brak InfiniReach API Key w ustawieniach.');
+        if ($from === '')   throw new Exception('Brak numeru telefonu nadawcy (InfiniReach) w ustawieniach.');
+        if ($to === '')     throw new Exception('Brak numeru telefonu odbiorcy (InfiniReach) w ustawieniach.');
+
+        $resp = wp_remote_post('https://api.infinireach.io/api/v1/messages', [
+            'headers' => [
+                'X-API-Key'    => $apiKey,
+                'Content-Type' => 'application/json',
+            ],
+            'body'    => wp_json_encode([
+                'to'      => $to,
+                'message' => $message,
+                'from'    => $from,
+                'channel' => 'sms',
+            ]),
+            'timeout' => 20,
+        ]);
+
+        if (is_wp_error($resp)) throw new Exception('InfiniReach request failed: ' . $resp->get_error_message());
+
+        $code = wp_remote_retrieve_response_code($resp);
+        $raw  = wp_remote_retrieve_body($resp);
+        $json = json_decode($raw, true);
+
+        if ($code !== 200 && $code !== 201) {
+            throw new Exception('InfiniReach error: HTTP ' . $code . ' | ' . $raw);
+        }
+
+        return ['http' => $code, 'raw' => $raw, 'json' => $json];
+    }
+
     private static function send_daily_report_all_channels(string $summary): array {
         $opts    = self::get_options();
         $results = [];
@@ -2550,6 +2601,16 @@ final class Dotypos_Woo_Connector {
             } catch (Exception $e) {
                 $results['email'] = ['ok' => false, 'error' => $e->getMessage()];
                 self::log('error', 'Daily report email failed', ['ex' => $e->getMessage()]);
+            }
+        }
+
+        if (($opts['daily_report_smsgateway_enabled'] ?? 'no') === 'yes') {
+            try {
+                $r = self::send_via_smsgateway($summary);
+                $results['smsgateway'] = ['ok' => true, 'http' => $r['http']];
+            } catch (Exception $e) {
+                $results['smsgateway'] = ['ok' => false, 'error' => $e->getMessage()];
+                self::log('error', 'Daily report SMS Gateway failed', ['ex' => $e->getMessage()]);
             }
         }
 
