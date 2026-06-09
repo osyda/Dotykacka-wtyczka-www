@@ -668,15 +668,32 @@ final class Dotypos_Woo_Connector {
         document.getElementById('dwco_hist_results').style.display = 'block';
 
         var html = '<table style=\"border-collapse:collapse;width:100%;font-size:12px;\">';
-        html += '<tr style=\"background:#0073aa;color:#fff;\"><th style=\"padding:4px 8px;\">Data</th><th style=\"padding:4px 8px;text-align:left;\">Raport</th></tr>';
+        html += '<tr style=\"background:#0073aa;color:#fff;\">';
+        html += '<th style=\"padding:4px 8px;\">Data</th>';
+        html += '<th style=\"padding:4px 8px;text-align:left;\">Raport</th>';
+        html += '<th style=\"padding:4px 8px;text-align:left;\">T: (karta) — wpisz</th>';
+        html += '</tr>';
         for (var j=0; j<reports.length; j++) {
             var r = reports[j];
             var bg = j%2===0 ? '#fff' : '#f9f9f9';
-            html += '<tr style=\"background:'+bg+'\"><td style=\"padding:4px 8px;white-space:nowrap;font-weight:bold;\">'+r.date+'</td>';
-            html += '<td style=\"padding:4px 8px;\"><pre style=\"margin:0;font-size:11px;\">'+r.summary.replace(/</g,'&lt;')+'</pre></td></tr>';
+            html += '<tr style=\"background:'+bg+'\" data-idx=\"'+j+'\">';
+            html += '<td style=\"padding:4px 8px;white-space:nowrap;font-weight:bold;\">'+r.date+'</td>';
+            html += '<td style=\"padding:4px 8px;\"><pre style=\"margin:0;font-size:11px;\">'+r.summary.replace(/</g,'&lt;')+'</pre></td>';
+            html += '<td style=\"padding:4px 8px;\"><input type=\"number\" class=\"dwco-t-val\" data-idx=\"'+j+'\" placeholder=\"np. 1234\" style=\"width:90px;\" /></td>';
+            html += '</tr>';
         }
         html += '</table>';
+        html += '<p style=\"font-size:11px;color:#666;\">Wpisz kwoty T: z Excela. Jeśli zostawisz puste — wiersz T: nie pojawi się w raporcie.</p>';
         document.getElementById('dwco_hist_table_wrap').innerHTML = html;
+
+        // Update reports_json when T values change
+        document.getElementById('dwco_hist_table_wrap').addEventListener('input', function(e){
+            if (e.target.classList.contains('dwco-t-val')) {
+                var idx = parseInt(e.target.getAttribute('data-idx'));
+                reports[idx].t_value = e.target.value.trim();
+                document.getElementById('dwco_hist_reports_json').value = JSON.stringify(reports);
+            }
+        });
         document.getElementById('dwco_hist_reports_json').value = JSON.stringify(reports);
     }
 })();
@@ -2418,7 +2435,6 @@ final class Dotypos_Woo_Connector {
             "S: " . self::mm_money($s),
             "O: " . self::mm_money($o),
             "W: " . self::mm_money($w),
-            "T: " . self::mm_money($t),
             "PIZZA: " . self::mm_qty($pizzaCount),
         ]);
     }
@@ -2591,12 +2607,16 @@ final class Dotypos_Woo_Connector {
             exit;
         }
 
-        // Keep only {date, summary}
+        // Keep only {date, summary}, append T: if provided
         $clean = [];
         foreach ($reports as $r) {
-            if (isset($r['date'], $r['summary'])) {
-                $clean[] = ['date' => sanitize_text_field($r['date']), 'summary' => sanitize_textarea_field($r['summary'])];
+            if (!isset($r['date'], $r['summary'])) continue;
+            $summary = sanitize_textarea_field($r['summary']);
+            $tVal    = isset($r['t_value']) ? trim(sanitize_text_field($r['t_value'])) : '';
+            if ($tVal !== '' && is_numeric($tVal)) {
+                $summary .= "\nT: " . (string)(int)round((float)$tVal);
             }
+            $clean[] = ['date' => sanitize_text_field($r['date']), 'summary' => $summary];
         }
 
         update_option('dwco_historical_send_queue', $clean, false);
