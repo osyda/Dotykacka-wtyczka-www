@@ -28,6 +28,7 @@ final class Dotypos_Woo_Connector {
         add_action('dwco_sync_event', [__CLASS__, 'run_scheduled_sync']);
         add_action('dwco_retry_push_order', [__CLASS__, 'retry_push_order'], 10, 2);
         add_action('dwco_daily_report_cron_check', [__CLASS__, 'maybe_send_scheduled_daily_report']);
+        add_action('dwco_send_historical_batch',   [__CLASS__, 'send_historical_batch']);
     }
 
     public static function defaults(): array {
@@ -214,8 +215,10 @@ final class Dotypos_Woo_Connector {
         add_action('admin_post_dwco_send_last_daily_report_sms', [__CLASS__, 'handle_send_last_daily_report_sms']);
 
         // Public cron trigger endpoint (no login required)
-        add_action('wp_ajax_nopriv_dwco_cron_ping', [__CLASS__, 'handle_cron_ping']);
-        add_action('wp_ajax_dwco_cron_ping',        [__CLASS__, 'handle_cron_ping']);
+        add_action('wp_ajax_nopriv_dwco_cron_ping',        [__CLASS__, 'handle_cron_ping']);
+        add_action('wp_ajax_dwco_cron_ping',               [__CLASS__, 'handle_cron_ping']);
+        add_action('wp_ajax_dwco_fetch_historical_report', [__CLASS__, 'ajax_fetch_historical_report']);
+        add_action('admin_post_dwco_schedule_historical_send', [__CLASS__, 'handle_schedule_historical_send']);
 
         // Ensure cron secret exists
         self::maybe_init_cron_secret();
@@ -322,6 +325,7 @@ final class Dotypos_Woo_Connector {
             <a class='nav-tab ".(!isset($_GET['tab']) || $_GET['tab']==='settings' ? 'nav-tab-active':'')."' href='".esc_url(admin_url('admin.php?page=dwco&tab=settings'))."'>Ustawienia</a>
             <a class='nav-tab ".(isset($_GET['tab']) && $_GET['tab']==='diagnostics' ? 'nav-tab-active':'')."' href='".esc_url(admin_url('admin.php?page=dwco&tab=diagnostics'))."'>Diagnostyka</a>
             <a class='nav-tab ".(isset($_GET['tab']) && $_GET['tab']==='sync' ? 'nav-tab-active':'')."' href='".esc_url(admin_url('admin.php?page=dwco&tab=sync'))."'>Synchronizacja</a>
+            <a class='nav-tab ".(isset($_GET['tab']) && $_GET['tab']==='historical' ? 'nav-tab-active':'')."' href='".esc_url(admin_url('admin.php?page=dwco&tab=historical'))."'>Raporty historyczne</a>
             <a class='nav-tab ".(isset($_GET['tab']) && $_GET['tab']==='logs' ? 'nav-tab-active':'')."' href='".esc_url(admin_url('admin.php?page=dwco&tab=logs'))."'>Logi</a>
         </h2>";
 
@@ -547,6 +551,136 @@ final class Dotypos_Woo_Connector {
             echo "<h3>Ustawienia sync</h3>";
             echo "<p>Włącz auto-sync w zakładce <strong>Ustawienia</strong> (WP-Cron) i ustaw interwał.</p>";
             echo "<p class='description'>Uwaga: zdjęcia i opisy zwykle ustawiamy po stronie Woo/Orderable.</p>";
+        }
+
+        if ($tab === 'historical') {
+            $scheduledTs  = wp_next_scheduled('dwco_send_historical_batch');
+            $pendingQueue = get_option('dwco_historical_send_queue', []);
+
+            echo "<h2>Raporty historyczne</h2>";
+            echo "<p>Pobierz raporty za wybrany zakres dat, przejrzyj je, a następnie zaplanuj wysyłkę na jutro o 23:00.</p>";
+
+            if ($scheduledTs) {
+                $tz = wp_timezone();
+                $dt = new DateTime('@'.$scheduledTs);
+                $dt->setTimezone($tz);
+                echo "<div class='notice notice-warning'><p>Zaplanowana wysyłka: <strong>".$dt->format('d.m.Y H:i')."</strong> — ".count($pendingQueue)." raportów w kolejce.</p></div>";
+            }
+
+            // Step 1: date range form
+            $defaultFrom = '2026-04-20';
+            $defaultTo   = current_time('Y-m-d');
+            echo "<div style='background:#f6f7f7;border:1px solid #ddd;border-radius:4px;padding:16px;margin:12px 0;'>";
+            echo "<h3 style='margin-top:0;'>Krok 1 — Pobierz raporty z API</h3>";
+            echo "<label>Od: <input type='date' id='dwco_hist_from' value='".esc_attr($defaultFrom)."' /></label> &nbsp;";
+            echo "<label>Do: <input type='date' id='dwco_hist_to' value='".esc_attr($defaultTo)."' /></label> &nbsp;";
+            echo "<button type='button' id='dwco_hist_fetch_btn' class='button button-primary'>Pobierz raporty</button>";
+            echo "<div id='dwco_hist_progress' style='margin-top:10px;display:none;'>";
+            echo "<progress id='dwco_hist_bar' value='0' max='100' style='width:300px;'></progress> <span id='dwco_hist_status'></span>";
+            echo "</div>";
+            echo "</div>";
+
+            // Step 2: results table (populated by JS)
+            echo "<div id='dwco_hist_results' style='display:none;'>";
+            echo "<div style='background:#f6f7f7;border:1px solid #ddd;border-radius:4px;padding:16px;margin:12px 0;'>";
+            echo "<h3 style='margin-top:0;'>Krok 2 — Podgląd raportów</h3>";
+            echo "<div id='dwco_hist_table_wrap' style='max-height:400px;overflow-y:auto;'></div>";
+            echo "</div>";
+
+            // Step 3: schedule send
+            echo "<div style='background:#f6f7f7;border:1px solid #ddd;border-radius:4px;padding:16px;margin:12px 0;'>";
+            echo "<h3 style='margin-top:0;'>Krok 3 — Zaplanuj wysyłkę</h3>";
+            echo "<p>Jutro o 23:00 (czas warszawski) zostaną wysłane wszystkie raporty jako osobne wiadomości przez włączone kanały (SMS/Telegram/email).</p>";
+            echo "<form method='post' action='".esc_url(admin_url('admin-post.php'))."' id='dwco_hist_schedule_form'>";
+            echo "<input type='hidden' name='action' value='dwco_schedule_historical_send' />";
+            wp_nonce_field('dwco_schedule_historical_send');
+            echo "<input type='hidden' name='reports_json' id='dwco_hist_reports_json' value='' />";
+            submit_button('Zaplanuj wysyłkę na jutro 23:00', 'primary', 'submit', false);
+            echo "</form>";
+            echo "</div>";
+            echo "</div>"; // end results
+
+            // JS
+            echo "<script>
+(function(){
+    var nonce = '".wp_create_nonce('dwco_historical_report')."';
+    var ajaxUrl = '".admin_url('admin-ajax.php')."';
+    var reports = [];
+
+    document.getElementById('dwco_hist_fetch_btn').addEventListener('click', function(){
+        var from = document.getElementById('dwco_hist_from').value;
+        var to   = document.getElementById('dwco_hist_to').value;
+        if (!from || !to) { alert('Podaj zakres dat.'); return; }
+
+        var dates = [];
+        var cur = new Date(from);
+        var end = new Date(to);
+        while (cur <= end) {
+            dates.push(cur.toISOString().slice(0,10));
+            cur.setDate(cur.getDate()+1);
+        }
+        if (dates.length === 0) { alert('Brak dat w zakresie.'); return; }
+
+        reports = [];
+        document.getElementById('dwco_hist_progress').style.display = 'block';
+        document.getElementById('dwco_hist_results').style.display = 'none';
+        document.getElementById('dwco_hist_fetch_btn').disabled = true;
+
+        var i = 0;
+        function fetchNext() {
+            if (i >= dates.length) {
+                showResults();
+                document.getElementById('dwco_hist_fetch_btn').disabled = false;
+                return;
+            }
+            var date = dates[i];
+            document.getElementById('dwco_hist_status').textContent = 'Pobieranie: '+date+' ('+( i+1)+'/'+dates.length+')';
+            document.getElementById('dwco_hist_bar').value = Math.round((i/dates.length)*100);
+
+            var fd = new FormData();
+            fd.append('action','dwco_fetch_historical_report');
+            fd.append('nonce', nonce);
+            fd.append('date', date);
+
+            fetch(ajaxUrl, {method:'POST', body:fd})
+                .then(function(r){ return r.json(); })
+                .then(function(data){
+                    if (data.success) {
+                        reports.push(data.data);
+                    } else {
+                        reports.push({date:date, summary:'BŁĄD: '+(data.data||'?')});
+                    }
+                    i++;
+                    fetchNext();
+                })
+                .catch(function(){
+                    reports.push({date:date, summary:'BŁĄD: brak połączenia'});
+                    i++;
+                    fetchNext();
+                });
+        }
+        fetchNext();
+    });
+
+    function showResults() {
+        document.getElementById('dwco_hist_bar').value = 100;
+        document.getElementById('dwco_hist_status').textContent = 'Gotowe! '+reports.length+' raportów.';
+        document.getElementById('dwco_hist_results').style.display = 'block';
+
+        var html = '<table style=\"border-collapse:collapse;width:100%;font-size:12px;\">';
+        html += '<tr style=\"background:#0073aa;color:#fff;\"><th style=\"padding:4px 8px;\">Data</th><th style=\"padding:4px 8px;text-align:left;\">Raport</th></tr>';
+        for (var j=0; j<reports.length; j++) {
+            var r = reports[j];
+            var bg = j%2===0 ? '#fff' : '#f9f9f9';
+            html += '<tr style=\"background:'+bg+'\"><td style=\"padding:4px 8px;white-space:nowrap;font-weight:bold;\">'+r.date+'</td>';
+            html += '<td style=\"padding:4px 8px;\"><pre style=\"margin:0;font-size:11px;\">'+r.summary.replace(/</g,'&lt;')+'</pre></td></tr>';
+        }
+        html += '</table>';
+        document.getElementById('dwco_hist_table_wrap').innerHTML = html;
+        document.getElementById('dwco_hist_reports_json').value = JSON.stringify(reports);
+    }
+})();
+</script>";
         }
 
         if ($tab === 'logs') {
@@ -2404,6 +2538,94 @@ final class Dotypos_Woo_Connector {
         }
 
         return $results;
+    }
+
+    // ========== HISTORICAL REPORTS ==========
+
+    public static function ajax_fetch_historical_report(): void {
+        if (!current_user_can('manage_options')) wp_die('Forbidden', '', 403);
+        check_ajax_referer('dwco_historical_report', 'nonce');
+
+        $date = isset($_POST['date']) ? sanitize_text_field($_POST['date']) : '';
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            wp_send_json_error('Nieprawidłowa data.');
+        }
+
+        try {
+            $opts    = self::get_options();
+            $cloudId = trim($opts['cloud_id'] ?? '');
+            if ($cloudId === '') throw new Exception('Brak cloud_id.');
+
+            $tz    = wp_timezone();
+            $dtFrom = new DateTime($date, $tz);
+            $dtTo   = clone $dtFrom;
+            $dtTo->modify('+1 day');
+            $dateTo = $dtTo->format('Y-m-d');
+
+            $branchSala  = trim($opts['daily_report_branch_sala_id']  ?? '146005859');
+            $branchOgrod = trim($opts['daily_report_branch_ogrod_id'] ?? '150149839');
+
+            $salaResp  = self::api_request('GET', "https://api.dotykacka.cz/v2/clouds/{$cloudId}/branches/{$branchSala}/sales-report?dateFrom={$date}&dateTo={$dateTo}");
+            $ogrodResp = self::api_request('GET', "https://api.dotykacka.cz/v2/clouds/{$cloudId}/branches/{$branchOgrod}/sales-report?dateFrom={$date}&dateTo={$dateTo}");
+
+            $salaJson  = is_array($salaResp['json'])  ? $salaResp['json']  : [];
+            $ogrodJson = is_array($ogrodResp['json']) ? $ogrodResp['json'] : [];
+
+            $summary = self::build_daily_report_summary($date, $salaJson, $ogrodJson);
+
+            wp_send_json_success(['date' => $date, 'summary' => $summary]);
+        } catch (Exception $e) {
+            wp_send_json_error($e->getMessage());
+        }
+    }
+
+    public static function handle_schedule_historical_send(): void {
+        if (!current_user_can('manage_options')) wp_die('Forbidden');
+        check_admin_referer('dwco_schedule_historical_send');
+
+        $raw     = isset($_POST['reports_json']) ? wp_unslash($_POST['reports_json']) : '';
+        $reports = json_decode($raw, true);
+
+        if (!is_array($reports) || empty($reports)) {
+            wp_redirect(admin_url('admin.php?page=dwco&tab=historical&dwco_err=' . rawurlencode('Brak raportów — najpierw pobierz dane.')));
+            exit;
+        }
+
+        // Keep only {date, summary}
+        $clean = [];
+        foreach ($reports as $r) {
+            if (isset($r['date'], $r['summary'])) {
+                $clean[] = ['date' => sanitize_text_field($r['date']), 'summary' => sanitize_textarea_field($r['summary'])];
+            }
+        }
+
+        update_option('dwco_historical_send_queue', $clean, false);
+
+        // Schedule for tomorrow 23:00 Warsaw time
+        $tz      = new DateTimeZone('Europe/Warsaw');
+        $sendAt  = new DateTime('tomorrow 23:00:00', $tz);
+        wp_clear_scheduled_hook('dwco_send_historical_batch');
+        wp_schedule_single_event($sendAt->getTimestamp(), 'dwco_send_historical_batch');
+
+        wp_redirect(admin_url('admin.php?page=dwco&tab=historical&dwco_msg=' . rawurlencode('Zaplanowano wysyłkę ' . count($clean) . ' raportów na ' . $sendAt->format('d.m.Y H:i') . '.')));
+        exit;
+    }
+
+    public static function send_historical_batch(): void {
+        $queue = get_option('dwco_historical_send_queue', []);
+        if (!is_array($queue) || empty($queue)) return;
+
+        $sent = 0;
+        foreach ($queue as $report) {
+            $summary = $report['summary'] ?? '';
+            if ($summary === '') continue;
+            self::send_daily_report_all_channels($summary);
+            $sent++;
+            if ($sent < count($queue)) sleep(3); // pause between messages
+        }
+
+        delete_option('dwco_historical_send_queue');
+        self::log('info', 'Historical batch sent', ['count' => $sent]);
     }
 
     public static function maybe_send_scheduled_daily_report(): void {
