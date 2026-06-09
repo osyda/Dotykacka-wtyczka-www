@@ -599,6 +599,11 @@ final class Dotypos_Woo_Connector {
             echo "<div style='background:#f6f7f7;border:1px solid #ddd;border-radius:4px;padding:16px;margin:12px 0;'>";
             echo "<h3 style='margin-top:0;'>Krok 2 — Podgląd raportów</h3>";
             echo "<div id='dwco_hist_table_wrap' style='max-height:400px;overflow-y:auto;'></div>";
+            echo "<div style='margin-top:10px;'>";
+            echo "<label for='dwco_hist_tvalues_paste'><strong>Wklej wartości T: (jedna linia na dzień, format RRRR-MM-DD=kwota lub DD.MM.RRRR=kwota)</strong></label><br/>";
+            echo "<textarea id='dwco_hist_tvalues_paste' rows='6' style='width:100%;font-family:monospace;font-size:12px;' placeholder='2026-04-20=217&#10;2026-04-21=180.5'></textarea>";
+            echo "<p><button type='button' id='dwco_hist_apply_tvalues' class='button'>Zastosuj wartości T do tabeli</button> <span id='dwco_hist_apply_status'></span></p>";
+            echo "</div>";
             echo "</div>";
 
             // Step 3: schedule send
@@ -710,6 +715,34 @@ final class Dotypos_Woo_Connector {
         });
         document.getElementById('dwco_hist_reports_json').value = JSON.stringify(reports);
     }
+
+    document.getElementById('dwco_hist_apply_tvalues').addEventListener('click', function(){
+        var text = document.getElementById('dwco_hist_tvalues_paste').value;
+        var lines = text.split(/\\r?\\n/);
+        var applied = 0, skipped = 0;
+        lines.forEach(function(line){
+            line = line.trim();
+            if (!line) return;
+            var parts = line.split(/[=,;\\t]+/);
+            if (parts.length < 2) { parts = line.split(/\\s+/); }
+            if (parts.length < 2) { skipped++; return; }
+            var dateStr = parts[0].trim();
+            var val = parts[1].trim().replace(',', '.');
+            var m = dateStr.match(/^(\\d{2})\\.(\\d{2})\\.(\\d{4})\$/);
+            if (m) { dateStr = m[3]+'-'+m[2]+'-'+m[1]; }
+            var idx = -1;
+            for (var k=0;k<reports.length;k++) {
+                if (reports[k].date === dateStr) { idx = k; break; }
+            }
+            if (idx === -1) { skipped++; return; }
+            reports[idx].t_value = val;
+            var input = document.querySelector('.dwco-t-val[data-idx=\"'+idx+'\"]');
+            if (input) input.value = val;
+            applied++;
+        });
+        document.getElementById('dwco_hist_reports_json').value = JSON.stringify(reports);
+        document.getElementById('dwco_hist_apply_status').textContent = 'Zastosowano: '+applied+', pominięto: '+skipped+'.';
+    });
 })();
 </script>";
         }
