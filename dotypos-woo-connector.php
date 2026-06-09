@@ -232,6 +232,7 @@ final class Dotypos_Woo_Connector {
         add_action('wp_ajax_nopriv_dwco_cron_ping',        [__CLASS__, 'handle_cron_ping']);
         add_action('wp_ajax_dwco_cron_ping',               [__CLASS__, 'handle_cron_ping']);
         add_action('wp_ajax_dwco_fetch_historical_report', [__CLASS__, 'ajax_fetch_historical_report']);
+        add_action('wp_ajax_dwco_test_send_report', [__CLASS__, 'ajax_test_send_report']);
         add_action('admin_post_dwco_schedule_historical_send', [__CLASS__, 'handle_schedule_historical_send']);
 
         // Ensure cron secret exists
@@ -606,6 +607,16 @@ final class Dotypos_Woo_Connector {
             echo "</div>";
             echo "</div>";
 
+            // Step 2b: test send
+            echo "<div style='background:#f6f7f7;border:1px solid #ddd;border-radius:4px;padding:16px;margin:12px 0;'>";
+            echo "<h3 style='margin-top:0;'>Test wysyłki SMS Gateway (na inny numer)</h3>";
+            echo "<p>Wyślij kilka pierwszych raportów z powyższej tabeli jako prawdziwe SMS-y na podany numer testowy — sprawdź, czy bramka InfiniReach działa, zanim zaplanujesz pełną wysyłkę.</p>";
+            echo "<label>Numer testowy: <input type='text' id='dwco_hist_test_phone' placeholder='np. +48500000000' style='width:180px;' /></label> &nbsp;";
+            echo "<label>Ile raportów: <input type='number' id='dwco_hist_test_count' value='5' min='1' max='20' style='width:60px;' /></label> &nbsp;";
+            echo "<button type='button' id='dwco_hist_test_btn' class='button button-secondary'>Wyślij test SMS</button>";
+            echo "<pre id='dwco_hist_test_status' style='margin-top:8px;font-size:12px;white-space:pre-wrap;'></pre>";
+            echo "</div>";
+
             // Step 3: schedule send
             echo "<div style='background:#f6f7f7;border:1px solid #ddd;border-radius:4px;padding:16px;margin:12px 0;'>";
             echo "<h3 style='margin-top:0;'>Krok 3 — Zaplanuj wysyłkę</h3>";
@@ -691,18 +702,21 @@ final class Dotypos_Woo_Connector {
         html += '<th style=\"padding:4px 8px;\">Data</th>';
         html += '<th style=\"padding:4px 8px;text-align:left;\">Raport</th>';
         html += '<th style=\"padding:4px 8px;text-align:left;\">T: (karta) — wpisz</th>';
+        html += '<th style=\"padding:4px 8px;\">Akcja</th>';
         html += '</tr>';
         for (var j=0; j<reports.length; j++) {
             var r = reports[j];
             var bg = j%2===0 ? '#fff' : '#f9f9f9';
+            var tVal = (r.t_value !== undefined && r.t_value !== null) ? r.t_value : '';
             html += '<tr style=\"background:'+bg+'\" data-idx=\"'+j+'\">';
             html += '<td style=\"padding:4px 8px;white-space:nowrap;font-weight:bold;\">'+r.date+'</td>';
             html += '<td style=\"padding:4px 8px;\"><pre style=\"margin:0;font-size:11px;\">'+r.summary.replace(/</g,'&lt;')+'</pre></td>';
-            html += '<td style=\"padding:4px 8px;\"><input type=\"number\" class=\"dwco-t-val\" data-idx=\"'+j+'\" placeholder=\"np. 1234\" style=\"width:90px;\" /></td>';
+            html += '<td style=\"padding:4px 8px;\"><input type=\"number\" class=\"dwco-t-val\" data-idx=\"'+j+'\" value=\"'+tVal+'\" placeholder=\"np. 1234\" style=\"width:90px;\" /></td>';
+            html += '<td style=\"padding:4px 8px;text-align:center;\"><button type=\"button\" class=\"button dwco-del-row\" data-idx=\"'+j+'\">Usuń</button></td>';
             html += '</tr>';
         }
         html += '</table>';
-        html += '<p style=\"font-size:11px;color:#666;\">Wpisz kwoty T: z Excela. Jeśli zostawisz puste — wiersz T: nie pojawi się w raporcie.</p>';
+        html += '<p style=\"font-size:11px;color:#666;\">Wpisz kwoty T: z Excela. Jeśli zostawisz puste — wiersz T: nie pojawi się w raporcie. Przyciskiem \"Usuń\" usuń dni, które nie powinny pójść do wysyłki (np. błąd pobierania).</p>';
         document.getElementById('dwco_hist_table_wrap').innerHTML = html;
 
         // Update reports_json when T values change
@@ -713,6 +727,16 @@ final class Dotypos_Woo_Connector {
                 document.getElementById('dwco_hist_reports_json').value = JSON.stringify(reports);
             }
         });
+
+        // Delete row
+        document.getElementById('dwco_hist_table_wrap').addEventListener('click', function(e){
+            if (e.target.classList.contains('dwco-del-row')) {
+                var idx = parseInt(e.target.getAttribute('data-idx'));
+                reports.splice(idx, 1);
+                showResults();
+            }
+        });
+
         document.getElementById('dwco_hist_reports_json').value = JSON.stringify(reports);
     }
 
@@ -742,6 +766,53 @@ final class Dotypos_Woo_Connector {
         });
         document.getElementById('dwco_hist_reports_json').value = JSON.stringify(reports);
         document.getElementById('dwco_hist_apply_status').textContent = 'Zastosowano: '+applied+', pominięto: '+skipped+'.';
+    });
+
+    document.getElementById('dwco_hist_test_btn').addEventListener('click', function(){
+        var phone = document.getElementById('dwco_hist_test_phone').value.trim();
+        var count = parseInt(document.getElementById('dwco_hist_test_count').value, 10) || 5;
+        var statusEl = document.getElementById('dwco_hist_test_status');
+        if (!phone) { alert('Podaj numer testowy.'); return; }
+        if (reports.length === 0) { alert('Najpierw pobierz raporty.'); return; }
+
+        var n = Math.min(count, reports.length);
+        statusEl.textContent = 'Wysyłanie '+n+' testowych SMS na '+phone+'...\\n';
+        document.getElementById('dwco_hist_test_btn').disabled = true;
+
+        var i = 0;
+        function sendNext() {
+            if (i >= n) {
+                statusEl.textContent += 'Gotowe.';
+                document.getElementById('dwco_hist_test_btn').disabled = false;
+                return;
+            }
+            var r = reports[i];
+            var msg = r.summary;
+            if (r.t_value !== undefined && r.t_value !== null && String(r.t_value).trim() !== '') {
+                msg += '\\nT: ' + Math.round(parseFloat(r.t_value));
+            }
+
+            var fd = new FormData();
+            fd.append('action','dwco_test_send_report');
+            fd.append('nonce', nonce);
+            fd.append('to', phone);
+            fd.append('message', msg);
+
+            statusEl.textContent += r.date + ': wysyłanie...\\n';
+            fetch(ajaxUrl, {method:'POST', body:fd})
+                .then(function(resp){ return resp.json(); })
+                .then(function(data){
+                    statusEl.textContent += r.date + ': ' + (data.success ? 'OK' : ('BŁĄD: '+(data.data||'?'))) + '\\n';
+                    i++;
+                    setTimeout(sendNext, 3000);
+                })
+                .catch(function(){
+                    statusEl.textContent += r.date + ': BŁĄD: brak połączenia\\n';
+                    i++;
+                    setTimeout(sendNext, 3000);
+                });
+        }
+        sendNext();
     });
 })();
 </script>";
@@ -2566,11 +2637,11 @@ final class Dotypos_Woo_Connector {
         return ['http' => 200, 'raw' => 'ok', 'json' => null];
     }
 
-    private static function send_via_smsgateway(string $message): array {
+    private static function send_via_smsgateway(string $message, string $toOverride = ''): array {
         $opts    = self::get_options();
         $apiKey  = trim($opts['daily_report_smsgateway_api_key'] ?? '');
         $from    = trim($opts['daily_report_smsgateway_from_phone'] ?? '');
-        $to      = trim($opts['daily_report_smsgateway_to_phone'] ?? '');
+        $to      = $toOverride !== '' ? $toOverride : trim($opts['daily_report_smsgateway_to_phone'] ?? '');
 
         if ($apiKey === '') throw new Exception('Brak InfiniReach API Key w ustawieniach.');
         if ($from === '')   throw new Exception('Brak numeru telefonu nadawcy (InfiniReach) w ustawieniach.');
@@ -2684,6 +2755,24 @@ final class Dotypos_Woo_Connector {
             $summary = self::build_daily_report_summary($date, $salaJson, $ogrodJson);
 
             wp_send_json_success(['date' => $date, 'summary' => $summary]);
+        } catch (Exception $e) {
+            wp_send_json_error($e->getMessage());
+        }
+    }
+
+    public static function ajax_test_send_report(): void {
+        if (!current_user_can('manage_options')) wp_die('Forbidden', '', 403);
+        check_ajax_referer('dwco_historical_report', 'nonce');
+
+        $to      = isset($_POST['to']) ? sanitize_text_field($_POST['to']) : '';
+        $message = isset($_POST['message']) ? sanitize_textarea_field(wp_unslash($_POST['message'])) : '';
+
+        if ($to === '')      wp_send_json_error('Brak numeru testowego.');
+        if ($message === '') wp_send_json_error('Brak treści wiadomości.');
+
+        try {
+            $r = self::send_via_smsgateway($message, $to);
+            wp_send_json_success(['http' => $r['http']]);
         } catch (Exception $e) {
             wp_send_json_error($e->getMessage());
         }
