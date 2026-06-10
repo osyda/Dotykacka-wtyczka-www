@@ -234,6 +234,7 @@ final class Dotypos_Woo_Connector {
         add_action('wp_ajax_dwco_fetch_historical_report', [__CLASS__, 'ajax_fetch_historical_report']);
         add_action('wp_ajax_dwco_test_send_report', [__CLASS__, 'ajax_test_send_report']);
         add_action('admin_post_dwco_schedule_historical_send', [__CLASS__, 'handle_schedule_historical_send']);
+        add_action('admin_post_dwco_cancel_historical_send', [__CLASS__, 'handle_cancel_historical_send']);
 
         // Ensure cron secret exists
         self::maybe_init_cron_secret();
@@ -579,7 +580,13 @@ final class Dotypos_Woo_Connector {
                 $tz = wp_timezone();
                 $dt = new DateTime('@'.$scheduledTs);
                 $dt->setTimezone($tz);
-                echo "<div class='notice notice-warning'><p>Zaplanowana wysyłka: <strong>".$dt->format('d.m.Y H:i')."</strong> — ".count($pendingQueue)." raportów w kolejce.</p></div>";
+                echo "<div class='notice notice-warning'><p>Zaplanowana wysyłka: <strong>".$dt->format('d.m.Y H:i')."</strong> — ".count($pendingQueue)." raportów w kolejce.</p>";
+                echo "<form method='post' action='".esc_url(admin_url('admin-post.php'))."' style='margin:8px 0 0;'>";
+                echo "<input type='hidden' name='action' value='dwco_cancel_historical_send' />";
+                wp_nonce_field('dwco_cancel_historical_send');
+                submit_button('Anuluj zaplanowaną wysyłkę', 'delete', 'submit', false);
+                echo "</form>";
+                echo "</div>";
             }
 
             // Step 1: date range form
@@ -2811,6 +2818,17 @@ final class Dotypos_Woo_Connector {
         wp_schedule_single_event($sendAt->getTimestamp(), 'dwco_send_historical_batch');
 
         wp_redirect(admin_url('admin.php?page=dwco&tab=historical&dwco_msg=' . rawurlencode('Zaplanowano wysyłkę ' . count($clean) . ' raportów na ' . $sendAt->format('d.m.Y H:i') . '.')));
+        exit;
+    }
+
+    public static function handle_cancel_historical_send(): void {
+        if (!current_user_can('manage_options')) wp_die('Forbidden');
+        check_admin_referer('dwco_cancel_historical_send');
+
+        wp_clear_scheduled_hook('dwco_send_historical_batch');
+        delete_option('dwco_historical_send_queue');
+
+        wp_redirect(admin_url('admin.php?page=dwco&tab=historical&dwco_msg=' . rawurlencode('Zaplanowana wysyłka raportów historycznych została anulowana.')));
         exit;
     }
 
