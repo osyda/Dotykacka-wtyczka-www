@@ -796,7 +796,18 @@ final class Dotypos_Woo_Connector {
             var r = reports[i];
             var msg = r.summary;
             if (r.t_value !== undefined && r.t_value !== null && String(r.t_value).trim() !== '') {
-                msg += '\\nT: ' + Math.round(parseFloat(r.t_value));
+                var tLine = 'T: ' + Math.round(parseFloat(r.t_value));
+                var msgLines = msg.split('\\n');
+                var pizzaIdx = -1;
+                for (var pi=0; pi<msgLines.length; pi++) {
+                    if (msgLines[pi].indexOf('PIZZA:') === 0) { pizzaIdx = pi; break; }
+                }
+                if (pizzaIdx !== -1) {
+                    msgLines.splice(pizzaIdx, 0, tLine);
+                } else {
+                    msgLines.push(tLine);
+                }
+                msg = msgLines.join('\\n');
             }
 
             var fd = new FormData();
@@ -2797,14 +2808,25 @@ final class Dotypos_Woo_Connector {
             exit;
         }
 
-        // Keep only {date, summary}, append T: if provided
+        // Keep only {date, summary}, insert T: line before PIZZA if provided
         $clean = [];
         foreach ($reports as $r) {
             if (!isset($r['date'], $r['summary'])) continue;
             $summary = sanitize_textarea_field($r['summary']);
             $tVal    = isset($r['t_value']) ? trim(sanitize_text_field($r['t_value'])) : '';
             if ($tVal !== '' && is_numeric($tVal)) {
-                $summary .= "\nT: " . (string)(int)round((float)$tVal);
+                $tLine = "T: " . (string)(int)round((float)$tVal);
+                $lines = explode("\n", $summary);
+                $pizzaIdx = null;
+                foreach ($lines as $idx => $line) {
+                    if (strpos($line, 'PIZZA:') === 0) { $pizzaIdx = $idx; break; }
+                }
+                if ($pizzaIdx !== null) {
+                    array_splice($lines, $pizzaIdx, 0, [$tLine]);
+                } else {
+                    $lines[] = $tLine;
+                }
+                $summary = implode("\n", $lines);
             }
             $clean[] = ['date' => sanitize_text_field($r['date']), 'summary' => $summary];
         }
