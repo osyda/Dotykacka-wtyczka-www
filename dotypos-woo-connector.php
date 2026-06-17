@@ -28,6 +28,7 @@ final class Dotypos_Woo_Connector {
         add_action('dwco_sync_event', [__CLASS__, 'run_scheduled_sync']);
         add_action('dwco_retry_push_order', [__CLASS__, 'retry_push_order'], 10, 2);
         add_action('dwco_daily_report_cron_check', [__CLASS__, 'maybe_send_scheduled_daily_report']);
+        add_action('dwco_send_historical_batch',   [__CLASS__, 'send_historical_batch']);
     }
 
     public static function defaults(): array {
@@ -55,11 +56,28 @@ final class Dotypos_Woo_Connector {
             'sync_exclude_delivery_products' => 'yes',
             'etag_products' => '',
             'etag_categories' => '',
-            // Daily report SMS
+            // Daily report
             'daily_report_enabled'               => 'no',
+            // SMS via SMSAPI.pl
+            'daily_report_sms_enabled'           => 'no',
             'daily_report_phone'                 => '',
             'daily_report_smsapi_token'          => '',
-            'daily_report_sms_sender'            => '',
+            'daily_report_sms_sender'            => 'MAMMAROSA',
+            // Telegram
+            'daily_report_telegram_enabled'      => 'no',
+            'daily_report_telegram_bot_token'    => '',
+            'daily_report_telegram_chat_id'      => '',
+            // Email
+            'daily_report_email_enabled'         => 'no',
+            'daily_report_email_to'              => '',
+            // SMS Gateway (InfiniReach) - SMS z własnego telefonu
+            'daily_report_smsgateway_enabled'    => 'no',
+            'daily_report_smsgateway_api_key'    => '',
+            'daily_report_smsgateway_from_phone' => '',
+            'daily_report_smsgateway_to_phone'   => '',
+            'daily_report_cron_secret'           => '',
+            'daily_report_time_weekday'          => '22:40',
+            'daily_report_time_weekend'          => '23:40',
             'daily_report_card_payment_method_id'=> '900000002',
             'daily_report_pizza_category_id'     => '1871188158721371',
             'daily_report_branch_sala_id'        => '146005859',
@@ -151,18 +169,52 @@ final class Dotypos_Woo_Connector {
         add_settings_field('sync_exclude_delivery_products', 'Nie importuj produktów DOWÓZ', [__CLASS__, 'field_yesno'], 'dwco', 'dwco_main', ['key' => 'sync_exclude_delivery_products']);
 
         // Daily report settings section
-        add_settings_section('dwco_daily_report', 'Raport dzienny SMS', function () {
-            echo '<p>Automatyczny raport dzienny ze sprzedaży (SALA + OGRÓD) wysyłany przez SMSAPI. Harmonogram: pn–czw, nd o 22:40; pt–sb o 23:40.</p>';
+        add_settings_section('dwco_daily_report', 'Raport dzienny', function () {
+            echo '<p>Automatyczny raport dzienny ze sprzedaży (SALA + OGRÓD). Możesz włączyć jeden lub więcej kanałów — SMS, Telegram, e-mail. Godziny wysyłki konfigurujesz poniżej.</p>';
         }, 'dwco');
 
-        add_settings_field('daily_report_enabled', 'Włącz raport SMS', [__CLASS__, 'field_yesno'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_enabled']);
-        add_settings_field('daily_report_phone', 'Numer telefonu', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_phone', 'placeholder' => 'np. 48500000000']);
-        add_settings_field('daily_report_smsapi_token', 'SMSAPI token', [__CLASS__, 'field_password'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_smsapi_token', 'placeholder' => '••••••••']);
-        add_settings_field('daily_report_sms_sender', 'Nadawca SMS', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_sms_sender', 'placeholder' => 'np. MAMMAROSA']);
+        add_settings_field('daily_report_enabled', 'Włącz raport dzienny', [__CLASS__, 'field_yesno'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_enabled']);
+        add_settings_field('daily_report_time_weekday', 'Godzina wysyłki pn–czw, nd', [__CLASS__, 'field_time'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_time_weekday']);
+        add_settings_field('daily_report_time_weekend', 'Godzina wysyłki pt–sb', [__CLASS__, 'field_time'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_time_weekend']);
         add_settings_field('daily_report_branch_sala_id', 'Branch ID SALA', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_branch_sala_id', 'placeholder' => '146005859']);
         add_settings_field('daily_report_branch_ogrod_id', 'Branch ID OGRÓD', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_branch_ogrod_id', 'placeholder' => '150149839']);
         add_settings_field('daily_report_card_payment_method_id', 'Payment method ID karta', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_card_payment_method_id', 'placeholder' => '900000002']);
         add_settings_field('daily_report_pizza_category_id', 'Category ID PIZZA', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_pizza_category_id', 'placeholder' => '1871188158721371']);
+
+        // SMS channel
+        add_settings_section('dwco_daily_report_sms', 'Kanał 1: SMS (SMSAPI.pl)', function () {
+            echo '<p>Wysyłka SMS przez <strong>SMSAPI.pl</strong>. Token OAuth znajdziesz w panelu SMSAPI → API → Token.</p>';
+        }, 'dwco');
+        add_settings_field('daily_report_sms_enabled', 'Włącz SMS', [__CLASS__, 'field_yesno'], 'dwco', 'dwco_daily_report_sms', ['key' => 'daily_report_sms_enabled']);
+        add_settings_field('daily_report_phone', 'Numer telefonu', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report_sms', ['key' => 'daily_report_phone', 'placeholder' => 'np. +48500000000']);
+        add_settings_field('daily_report_smsapi_token', 'SMSAPI Token', [__CLASS__, 'field_password'], 'dwco', 'dwco_daily_report_sms', ['key' => 'daily_report_smsapi_token', 'placeholder' => '••••••••']);
+        add_settings_field('daily_report_sms_sender', 'Nadawca SMS', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report_sms', ['key' => 'daily_report_sms_sender', 'placeholder' => 'np. MAMMAROSA']);
+
+        // Telegram channel
+        add_settings_section('dwco_daily_report_telegram', 'Kanał 2: Telegram', function () {
+            echo '<p>Wysyłka przez <strong>Telegram Bot API</strong>. Utwórz bota przez @BotFather, Chat ID możesz sprawdzić przez @userinfobot.</p>';
+        }, 'dwco');
+        add_settings_field('daily_report_telegram_enabled', 'Włącz Telegram', [__CLASS__, 'field_yesno'], 'dwco', 'dwco_daily_report_telegram', ['key' => 'daily_report_telegram_enabled']);
+        add_settings_field('daily_report_telegram_bot_token', 'Bot Token', [__CLASS__, 'field_password'], 'dwco', 'dwco_daily_report_telegram', ['key' => 'daily_report_telegram_bot_token', 'placeholder' => '••••••••']);
+        add_settings_field('daily_report_telegram_chat_id', 'Chat ID', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report_telegram', ['key' => 'daily_report_telegram_chat_id', 'placeholder' => 'np. -100123456789']);
+
+        // Email channel
+        add_settings_section('dwco_daily_report_email', 'Kanał 3: E-mail', function () {
+            echo '<p>Wysyłka e-maila przez WordPress (<code>wp_mail</code>). Adres nadawcy = adres admina WordPress.</p>';
+        }, 'dwco');
+        add_settings_field('daily_report_email_enabled', 'Włącz e-mail', [__CLASS__, 'field_yesno'], 'dwco', 'dwco_daily_report_email', ['key' => 'daily_report_email_enabled']);
+        add_settings_field('daily_report_email_to', 'Adres e-mail', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report_email', ['key' => 'daily_report_email_to', 'placeholder' => 'np. wlasciciel@restauracja.pl']);
+        add_settings_field('daily_report_card_payment_method_id', 'Payment method ID karta', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_card_payment_method_id', 'placeholder' => '900000002']);
+        add_settings_field('daily_report_pizza_category_id', 'Category ID PIZZA', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report', ['key' => 'daily_report_pizza_category_id', 'placeholder' => '1871188158721371']);
+
+        // SMS Gateway channel (InfiniReach - SMS z własnego telefonu)
+        add_settings_section('dwco_daily_report_smsgateway', 'Kanał 4: SMS z telefonu (InfiniReach)', function () {
+            echo '<p>Wysyłka SMS bezpośrednio z Twojego telefonu (przez aplikację <strong>SMS Gateway for Android</strong> połączoną z <strong>InfiniReach</strong>). API Key znajdziesz w panelu InfiniReach.</p>';
+        }, 'dwco');
+        add_settings_field('daily_report_smsgateway_enabled', 'Włącz SMS z telefonu', [__CLASS__, 'field_yesno'], 'dwco', 'dwco_daily_report_smsgateway', ['key' => 'daily_report_smsgateway_enabled']);
+        add_settings_field('daily_report_smsgateway_api_key', 'InfiniReach API Key', [__CLASS__, 'field_password'], 'dwco', 'dwco_daily_report_smsgateway', ['key' => 'daily_report_smsgateway_api_key', 'placeholder' => '••••••••']);
+        add_settings_field('daily_report_smsgateway_from_phone', 'Numer telefonu nadawcy (Twój)', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report_smsgateway', ['key' => 'daily_report_smsgateway_from_phone', 'placeholder' => 'np. +48781647139']);
+        add_settings_field('daily_report_smsgateway_to_phone', 'Numer telefonu odbiorcy', [__CLASS__, 'field_text'], 'dwco', 'dwco_daily_report_smsgateway', ['key' => 'daily_report_smsgateway_to_phone', 'placeholder' => 'np. +48500000000']);
 
         // Custom actions
         add_action('admin_post_dwco_connect', [__CLASS__, 'handle_admin_connect']);
@@ -170,10 +222,43 @@ final class Dotypos_Woo_Connector {
         add_action('admin_post_dwco_clear_logs', [__CLASS__, 'handle_clear_logs']);
         add_action('admin_post_dwco_import_menu', [__CLASS__, 'handle_import_menu']);
         add_action('admin_post_dwco_sync_now', [__CLASS__, 'handle_sync_now']);
+        add_action('admin_post_dwco_add_selected_products', [__CLASS__, 'handle_add_selected_products']);
         add_action('admin_post_dwco_list_customizations', [__CLASS__, 'handle_list_customizations']);
         add_action('admin_post_dwco_check_customization_id', [__CLASS__, 'handle_check_customization_id']);
         add_action('admin_post_dwco_test_daily_report', [__CLASS__, 'handle_test_daily_report']);
         add_action('admin_post_dwco_send_last_daily_report_sms', [__CLASS__, 'handle_send_last_daily_report_sms']);
+
+        // Public cron trigger endpoint (no login required)
+        add_action('wp_ajax_nopriv_dwco_cron_ping',        [__CLASS__, 'handle_cron_ping']);
+        add_action('wp_ajax_dwco_cron_ping',               [__CLASS__, 'handle_cron_ping']);
+        add_action('wp_ajax_dwco_fetch_historical_report', [__CLASS__, 'ajax_fetch_historical_report']);
+        add_action('wp_ajax_dwco_test_send_report', [__CLASS__, 'ajax_test_send_report']);
+        add_action('admin_post_dwco_schedule_historical_send', [__CLASS__, 'handle_schedule_historical_send']);
+        add_action('admin_post_dwco_cancel_historical_send', [__CLASS__, 'handle_cancel_historical_send']);
+
+        // Ensure cron secret exists
+        self::maybe_init_cron_secret();
+    }
+
+    private static function maybe_init_cron_secret(): void {
+        $opts = self::get_options();
+        if (empty($opts['daily_report_cron_secret'])) {
+            $opts['daily_report_cron_secret'] = wp_generate_password(32, false);
+            update_option(self::OPT_KEY, $opts);
+        }
+    }
+
+    public static function handle_cron_ping(): void {
+        $opts   = self::get_options();
+        $secret = trim($opts['daily_report_cron_secret'] ?? '');
+        $key    = isset($_GET['key']) ? sanitize_text_field($_GET['key']) : '';
+
+        if ($secret === '' || !hash_equals($secret, $key)) {
+            wp_die('Forbidden', '', ['response' => 403]);
+        }
+
+        do_action('dwco_daily_report_cron_check');
+        wp_send_json(['ok' => true]);
     }
 
     public static function sanitize_options($input) {
@@ -182,7 +267,7 @@ final class Dotypos_Woo_Connector {
         foreach ($keys as $k) {
             if (!isset($input[$k])) continue;
             $v = $input[$k];
-            if (in_array($k, ['client_secret', 'refresh_token', 'daily_report_smsapi_token'], true)) {
+            if (in_array($k, ['client_secret', 'refresh_token', 'daily_report_smsapi_token', 'daily_report_telegram_bot_token', 'daily_report_smsgateway_api_key'], true)) {
                 // allow empty to keep previous
                 $v = is_string($v) ? trim($v) : '';
                 if ($v === '') continue;
@@ -210,6 +295,12 @@ final class Dotypos_Woo_Connector {
         if ($key === 'refresh_token' && !empty($opts['refresh_token'])) {
             echo '<p class="description">Token zapisany. Mo&#380;esz klikn&#261;&#263; &bdquo;Test po&#322;&#261;czenia&rdquo;.</p>';
         }
+    }
+    public static function field_time($args) {
+        $opts = self::get_options();
+        $key  = $args['key'];
+        $val  = $opts[$key] ?? '22:00';
+        echo "<input type='time' name='".self::OPT_KEY."[$key]' value='".esc_attr($val)."' />";
     }
     public static function field_yesno($args) {
         $opts = self::get_options();
@@ -250,6 +341,7 @@ final class Dotypos_Woo_Connector {
             <a class='nav-tab ".(!isset($_GET['tab']) || $_GET['tab']==='settings' ? 'nav-tab-active':'')."' href='".esc_url(admin_url('admin.php?page=dwco&tab=settings'))."'>Ustawienia</a>
             <a class='nav-tab ".(isset($_GET['tab']) && $_GET['tab']==='diagnostics' ? 'nav-tab-active':'')."' href='".esc_url(admin_url('admin.php?page=dwco&tab=diagnostics'))."'>Diagnostyka</a>
             <a class='nav-tab ".(isset($_GET['tab']) && $_GET['tab']==='sync' ? 'nav-tab-active':'')."' href='".esc_url(admin_url('admin.php?page=dwco&tab=sync'))."'>Synchronizacja</a>
+            <a class='nav-tab ".(isset($_GET['tab']) && $_GET['tab']==='historical' ? 'nav-tab-active':'')."' href='".esc_url(admin_url('admin.php?page=dwco&tab=historical'))."'>Raporty historyczne</a>
             <a class='nav-tab ".(isset($_GET['tab']) && $_GET['tab']==='logs' ? 'nav-tab-active':'')."' href='".esc_url(admin_url('admin.php?page=dwco&tab=logs'))."'>Logi</a>
         </h2>";
 
@@ -347,6 +439,24 @@ final class Dotypos_Woo_Connector {
             // ---- Daily report section ----
             echo "<hr><h2>Raport dzienny Dotykačka</h2>";
             echo "<p>Pobiera raport sprzedaży z obu branchy (SALA + OGRÓD) i buduje podsumowanie.</p>";
+
+            $cronOpts   = self::get_options();
+            $cronSecret = $cronOpts['daily_report_cron_secret'] ?? '';
+            if ($cronSecret) {
+                $cronUrl = admin_url('admin-ajax.php') . '?action=dwco_cron_ping&key=' . urlencode($cronSecret);
+                $timeWeekday = esc_html($cronOpts['daily_report_time_weekday'] ?? '22:40');
+                $timeWeekend = esc_html($cronOpts['daily_report_time_weekend'] ?? '23:40');
+                echo "<div style='background:#e7f5fe;border:1px solid #7eb4d5;padding:12px 16px;border-radius:4px;margin-bottom:16px;'>";
+                echo "<strong>URL do zewnętrznego crona</strong><br>";
+                echo "Skopiuj adres poniżej i dodaj go w <a href='https://cron-job.org' target='_blank'>cron-job.org</a> (darmowy) jako <strong>dwa oddzielne zadania</strong>:<br>";
+                echo "<ul style='margin:8px 0 8px 16px;'>";
+                echo "<li><strong>Zadanie 1</strong> — godzina <code>{$timeWeekday}</code>, dni: poniedziałek, wtorek, środa, czwartek, niedziela</li>";
+                echo "<li><strong>Zadanie 2</strong> — godzina <code>{$timeWeekend}</code>, dni: piątek, sobota</li>";
+                echo "</ul>";
+                echo "Każde zadanie wywołuje URL <strong>raz o wyznaczonej godzinie</strong>. Wtyczka wyśle SMS i zablokuje ponowne wysłanie tego samego dnia.<br><br>";
+                echo "<input type='text' value='".esc_attr($cronUrl)."' readonly style='width:100%;font-family:monospace;font-size:12px;' onclick='this.select();' />";
+                echo "</div>";
+            }
             echo "<form method='post' action='".esc_url(admin_url('admin-post.php'))."'>";
             echo "<input type='hidden' name='action' value='dwco_test_daily_report' />";
             wp_nonce_field('dwco_test_daily_report');
@@ -368,6 +478,13 @@ final class Dotypos_Woo_Connector {
                 wp_nonce_field('dwco_send_last_daily_report_sms');
                 submit_button('Wyślij ostatni raport SMS testowo', 'secondary', 'submit', false);
                 echo "</form>";
+
+                $debugJson = get_transient('dwco_last_daily_report_debug');
+                if ($debugJson) {
+                    echo "<details style='margin-top:16px;'><summary style='cursor:pointer;font-weight:600;'>🔍 Debug: surowy JSON z API (kliknij aby rozwinąć)</summary>";
+                    echo "<pre style='background:#fff3cd;border:1px solid #ffc107;padding:12px;border-radius:4px;font-size:11px;line-height:1.4;overflow:auto;max-height:500px;'>".esc_html(json_encode($debugJson, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE))."</pre>";
+                    echo "</details>";
+                }
             }
         }
 
@@ -390,13 +507,333 @@ final class Dotypos_Woo_Connector {
             echo "<form method='post' action='".esc_url(admin_url('admin-post.php'))."'>";
             echo "<input type='hidden' name='action' value='dwco_sync_now' />";
             wp_nonce_field('dwco_sync_now');
-            submit_button('Synchronizuj teraz', 'secondary', 'submit', false);
+            submit_button('Synchronizuj teraz (tylko ceny)', 'secondary', 'submit', false);
             echo "</form>";
             echo "</div>";
+
+            echo "<p class='description'><strong>Synchronizuj teraz</strong> — aktualizuje TYLKO ceny istniejących produktów. Nie tworzy nowych, nie zmienia kategorii.</p>";
+
+            // --- NEW PRODUCTS (in Dotykacka, not in WC) ---
+            $newProds = get_option('dwco_last_sync_new_products', []);
+            if (!empty($newProds) && is_array($newProds)) {
+                echo "<div style='background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:12px 16px;margin:12px 0;'>";
+                echo "<strong style='font-size:14px;'>Nowe produkty w Dotykačce (nieobecne w WooCommerce):</strong>";
+                echo "<form method='post' action='".esc_url(admin_url('admin-post.php'))."' style='margin-top:8px;'>";
+                echo "<input type='hidden' name='action' value='dwco_add_selected_products' />";
+                wp_nonce_field('dwco_add_selected_products');
+                echo "<table style='border-collapse:collapse;width:100%;'>";
+                echo "<tr style='background:#ffc107;'>";
+                echo "<th style='padding:4px 8px;text-align:center;width:32px;'><input type='checkbox' id='dwco_check_all' title='Zaznacz wszystkie' /></th>";
+                echo "<th style='padding:4px 8px;text-align:left;'>Nazwa</th>";
+                echo "<th style='padding:4px 8px;text-align:left;'>Kategoria</th>";
+                echo "<th style='padding:4px 8px;text-align:right;'>Cena</th>";
+                echo "</tr>";
+                foreach ($newProds as $idx => $np) {
+                    echo "<tr style='border-top:1px solid #ffc107;'>";
+                    echo "<td style='padding:4px 8px;text-align:center;'><input type='checkbox' name='new_prod_idx[]' value='".esc_attr($idx)."' class='dwco-new-prod-cb' /></td>";
+                    echo "<td style='padding:4px 8px;'>".esc_html($np['name'])."</td>";
+                    echo "<td style='padding:4px 8px;'>".esc_html($np['category'])."</td>";
+                    echo "<td style='padding:4px 8px;text-align:right;'>".esc_html(number_format((float)$np['price'], 2, ',', ' '))." zł</td>";
+                    echo "</tr>";
+                }
+                echo "</table>";
+                echo "<div style='margin-top:8px;'>";
+                submit_button('Dodaj zaznaczone do WooCommerce', 'primary small', 'submit', false);
+                echo "</div>";
+                echo "</form>";
+                echo "<script>document.getElementById('dwco_check_all').addEventListener('change',function(){document.querySelectorAll('.dwco-new-prod-cb').forEach(function(cb){cb.checked=document.getElementById('dwco_check_all').checked;});});</script>";
+                echo "</div>";
+            }
+
+            // --- MISSING PRODUCTS (in WC but gone from Dotykacka) ---
+            $missingProds = get_option('dwco_last_sync_missing_products', []);
+            if (!empty($missingProds) && is_array($missingProds)) {
+                echo "<div style='background:#f8d7da;border:1px solid #f5c6cb;border-radius:4px;padding:12px 16px;margin:12px 0;'>";
+                echo "<strong style='font-size:14px;color:#721c24;'>Produkty nieobecne w Dotykačce (zniknęły z kasy):</strong>";
+                echo "<table style='border-collapse:collapse;margin-top:8px;width:100%;'>";
+                echo "<tr style='background:#f5c6cb;'><th style='padding:4px 8px;text-align:left;'>Nazwa (WooCommerce)</th><th style='padding:4px 8px;text-align:left;'>Dotypos ID</th><th style='padding:4px 8px;text-align:left;'>Akcja</th></tr>";
+                foreach ($missingProds as $mp) {
+                    echo "<tr style='border-top:1px solid #f5c6cb;'>";
+                    echo "<td style='padding:4px 8px;'>".esc_html($mp['name'])."</td>";
+                    echo "<td style='padding:4px 8px;font-family:monospace;'>".esc_html($mp['dotypos_id'])."</td>";
+                    echo "<td style='padding:4px 8px;'><a href='".esc_url($mp['edit_url'])."' target='_blank'>Edytuj w WC</a></td>";
+                    echo "</tr>";
+                }
+                echo "</table>";
+                echo "<p style='margin:8px 0 0;font-size:12px;color:#721c24;'>Te produkty istnieją w WooCommerce, ale nie ma ich w Dotykačce. Sprawdź czy zostały usunięte z kasy.</p>";
+                echo "</div>";
+            }
 
             echo "<h3>Ustawienia sync</h3>";
             echo "<p>Włącz auto-sync w zakładce <strong>Ustawienia</strong> (WP-Cron) i ustaw interwał.</p>";
             echo "<p class='description'>Uwaga: zdjęcia i opisy zwykle ustawiamy po stronie Woo/Orderable.</p>";
+        }
+
+        if ($tab === 'historical') {
+            $scheduledTs  = wp_next_scheduled('dwco_send_historical_batch');
+            $pendingQueue = get_option('dwco_historical_send_queue', []);
+
+            echo "<h2>Raporty historyczne</h2>";
+            echo "<p>Pobierz raporty za wybrany zakres dat, przejrzyj je, a następnie zaplanuj wysyłkę na jutro o 23:00.</p>";
+
+            if ($scheduledTs) {
+                $tz = wp_timezone();
+                $dt = new DateTime('@'.$scheduledTs);
+                $dt->setTimezone($tz);
+                echo "<div class='notice notice-warning'><p>Zaplanowana wysyłka: <strong>".$dt->format('d.m.Y H:i')."</strong> — ".count($pendingQueue)." raportów w kolejce.</p>";
+                echo "<form method='post' action='".esc_url(admin_url('admin-post.php'))."' style='margin:8px 0 0;'>";
+                echo "<input type='hidden' name='action' value='dwco_cancel_historical_send' />";
+                wp_nonce_field('dwco_cancel_historical_send');
+                submit_button('Anuluj zaplanowaną wysyłkę', 'delete', 'submit', false);
+                echo "</form>";
+                echo "</div>";
+            }
+
+            // Step 1: date range form
+            $defaultFrom = '2026-04-20';
+            $defaultTo   = current_time('Y-m-d');
+            echo "<div style='background:#f6f7f7;border:1px solid #ddd;border-radius:4px;padding:16px;margin:12px 0;'>";
+            echo "<h3 style='margin-top:0;'>Krok 1 — Pobierz raporty z API</h3>";
+            echo "<label>Od: <input type='date' id='dwco_hist_from' value='".esc_attr($defaultFrom)."' /></label> &nbsp;";
+            echo "<label>Do: <input type='date' id='dwco_hist_to' value='".esc_attr($defaultTo)."' /></label> &nbsp;";
+            echo "<button type='button' id='dwco_hist_fetch_btn' class='button button-primary'>Pobierz raporty</button>";
+            echo "<div id='dwco_hist_progress' style='margin-top:10px;display:none;'>";
+            echo "<progress id='dwco_hist_bar' value='0' max='100' style='width:300px;'></progress> <span id='dwco_hist_status'></span>";
+            echo "</div>";
+            echo "</div>";
+
+            // Step 2: results table (populated by JS)
+            echo "<div id='dwco_hist_results' style='display:none;'>";
+            echo "<div style='background:#f6f7f7;border:1px solid #ddd;border-radius:4px;padding:16px;margin:12px 0;'>";
+            echo "<h3 style='margin-top:0;'>Krok 2 — Podgląd raportów</h3>";
+            echo "<div id='dwco_hist_table_wrap' style='max-height:400px;overflow-y:auto;'></div>";
+            echo "<div style='margin-top:10px;'>";
+            echo "<label for='dwco_hist_tvalues_paste'><strong>Wklej wartości T: (jedna linia na dzień, format RRRR-MM-DD=kwota lub DD.MM.RRRR=kwota)</strong></label><br/>";
+            echo "<textarea id='dwco_hist_tvalues_paste' rows='6' style='width:100%;font-family:monospace;font-size:12px;' placeholder='2026-04-20=217&#10;2026-04-21=180.5'></textarea>";
+            echo "<p><button type='button' id='dwco_hist_apply_tvalues' class='button'>Zastosuj wartości T do tabeli</button> <span id='dwco_hist_apply_status'></span></p>";
+            echo "</div>";
+            echo "</div>";
+
+            // Step 2b: test send
+            echo "<div style='background:#f6f7f7;border:1px solid #ddd;border-radius:4px;padding:16px;margin:12px 0;'>";
+            echo "<h3 style='margin-top:0;'>Test wysyłki SMS Gateway (na inny numer)</h3>";
+            echo "<p>Wyślij kilka pierwszych raportów z powyższej tabeli jako prawdziwe SMS-y na podany numer testowy — sprawdź, czy bramka InfiniReach działa, zanim zaplanujesz pełną wysyłkę.</p>";
+            echo "<label>Numer testowy: <input type='text' id='dwco_hist_test_phone' placeholder='np. +48500000000' style='width:180px;' /></label> &nbsp;";
+            echo "<label>Ile raportów: <input type='number' id='dwco_hist_test_count' value='5' min='1' max='20' style='width:60px;' /></label> &nbsp;";
+            echo "<button type='button' id='dwco_hist_test_btn' class='button button-secondary'>Wyślij test SMS</button>";
+            echo "<pre id='dwco_hist_test_status' style='margin-top:8px;font-size:12px;white-space:pre-wrap;'></pre>";
+            echo "</div>";
+
+            // Step 3: schedule send
+            echo "<div style='background:#f6f7f7;border:1px solid #ddd;border-radius:4px;padding:16px;margin:12px 0;'>";
+            echo "<h3 style='margin-top:0;'>Krok 3 — Zaplanuj wysyłkę</h3>";
+            echo "<p>Jutro o 23:00 (czas warszawski) zostaną wysłane wszystkie raporty jako osobne wiadomości przez włączone kanały (SMS/Telegram/email).</p>";
+            echo "<form method='post' action='".esc_url(admin_url('admin-post.php'))."' id='dwco_hist_schedule_form'>";
+            echo "<input type='hidden' name='action' value='dwco_schedule_historical_send' />";
+            wp_nonce_field('dwco_schedule_historical_send');
+            echo "<input type='hidden' name='reports_json' id='dwco_hist_reports_json' value='' />";
+            submit_button('Zaplanuj wysyłkę na jutro 23:00', 'primary', 'submit', false);
+            echo "</form>";
+            echo "</div>";
+            echo "</div>"; // end results
+
+            // JS
+            echo "<script>
+(function(){
+    var nonce = '".wp_create_nonce('dwco_historical_report')."';
+    var ajaxUrl = '".admin_url('admin-ajax.php')."';
+    var reports = [];
+
+    document.getElementById('dwco_hist_fetch_btn').addEventListener('click', function(){
+        var from = document.getElementById('dwco_hist_from').value;
+        var to   = document.getElementById('dwco_hist_to').value;
+        if (!from || !to) { alert('Podaj zakres dat.'); return; }
+
+        var dates = [];
+        var cur = new Date(from);
+        var end = new Date(to);
+        while (cur <= end) {
+            dates.push(cur.toISOString().slice(0,10));
+            cur.setDate(cur.getDate()+1);
+        }
+        if (dates.length === 0) { alert('Brak dat w zakresie.'); return; }
+
+        reports = [];
+        document.getElementById('dwco_hist_progress').style.display = 'block';
+        document.getElementById('dwco_hist_results').style.display = 'none';
+        document.getElementById('dwco_hist_fetch_btn').disabled = true;
+
+        var i = 0;
+        function fetchNext() {
+            if (i >= dates.length) {
+                showResults();
+                document.getElementById('dwco_hist_fetch_btn').disabled = false;
+                return;
+            }
+            var date = dates[i];
+            document.getElementById('dwco_hist_status').textContent = 'Pobieranie: '+date+' ('+( i+1)+'/'+dates.length+')';
+            document.getElementById('dwco_hist_bar').value = Math.round((i/dates.length)*100);
+
+            var fd = new FormData();
+            fd.append('action','dwco_fetch_historical_report');
+            fd.append('nonce', nonce);
+            fd.append('date', date);
+
+            fetch(ajaxUrl, {method:'POST', body:fd})
+                .then(function(r){ return r.json(); })
+                .then(function(data){
+                    if (data.success) {
+                        reports.push(data.data);
+                    } else {
+                        reports.push({date:date, summary:'BŁĄD: '+(data.data||'?')});
+                    }
+                    i++;
+                    fetchNext();
+                })
+                .catch(function(){
+                    reports.push({date:date, summary:'BŁĄD: brak połączenia'});
+                    i++;
+                    fetchNext();
+                });
+        }
+        fetchNext();
+    });
+
+    function showResults() {
+        document.getElementById('dwco_hist_bar').value = 100;
+        document.getElementById('dwco_hist_status').textContent = 'Gotowe! '+reports.length+' raportów.';
+        document.getElementById('dwco_hist_results').style.display = 'block';
+
+        var html = '<table style=\"border-collapse:collapse;width:100%;font-size:12px;\">';
+        html += '<tr style=\"background:#0073aa;color:#fff;\">';
+        html += '<th style=\"padding:4px 8px;\">Data</th>';
+        html += '<th style=\"padding:4px 8px;text-align:left;\">Raport</th>';
+        html += '<th style=\"padding:4px 8px;text-align:left;\">T: (karta) — wpisz</th>';
+        html += '<th style=\"padding:4px 8px;\">Akcja</th>';
+        html += '</tr>';
+        for (var j=0; j<reports.length; j++) {
+            var r = reports[j];
+            var bg = j%2===0 ? '#fff' : '#f9f9f9';
+            var tVal = (r.t_value !== undefined && r.t_value !== null) ? r.t_value : '';
+            html += '<tr style=\"background:'+bg+'\" data-idx=\"'+j+'\">';
+            html += '<td style=\"padding:4px 8px;white-space:nowrap;font-weight:bold;\">'+r.date+'</td>';
+            html += '<td style=\"padding:4px 8px;\"><pre style=\"margin:0;font-size:11px;\">'+r.summary.replace(/</g,'&lt;')+'</pre></td>';
+            html += '<td style=\"padding:4px 8px;\"><input type=\"number\" class=\"dwco-t-val\" data-idx=\"'+j+'\" value=\"'+tVal+'\" placeholder=\"np. 1234\" style=\"width:90px;\" /></td>';
+            html += '<td style=\"padding:4px 8px;text-align:center;\"><button type=\"button\" class=\"button dwco-del-row\" data-idx=\"'+j+'\">Usuń</button></td>';
+            html += '</tr>';
+        }
+        html += '</table>';
+        html += '<p style=\"font-size:11px;color:#666;\">Wpisz kwoty T: z Excela. Jeśli zostawisz puste — wiersz T: nie pojawi się w raporcie. Przyciskiem \"Usuń\" usuń dni, które nie powinny pójść do wysyłki (np. błąd pobierania).</p>';
+        document.getElementById('dwco_hist_table_wrap').innerHTML = html;
+
+        // Update reports_json when T values change
+        document.getElementById('dwco_hist_table_wrap').addEventListener('input', function(e){
+            if (e.target.classList.contains('dwco-t-val')) {
+                var idx = parseInt(e.target.getAttribute('data-idx'));
+                reports[idx].t_value = e.target.value.trim();
+                document.getElementById('dwco_hist_reports_json').value = JSON.stringify(reports);
+            }
+        });
+
+        // Delete row
+        document.getElementById('dwco_hist_table_wrap').addEventListener('click', function(e){
+            if (e.target.classList.contains('dwco-del-row')) {
+                var idx = parseInt(e.target.getAttribute('data-idx'));
+                reports.splice(idx, 1);
+                showResults();
+            }
+        });
+
+        document.getElementById('dwco_hist_reports_json').value = JSON.stringify(reports);
+    }
+
+    document.getElementById('dwco_hist_apply_tvalues').addEventListener('click', function(){
+        var text = document.getElementById('dwco_hist_tvalues_paste').value;
+        var lines = text.split(/\\r?\\n/);
+        var applied = 0, skipped = 0;
+        lines.forEach(function(line){
+            line = line.trim();
+            if (!line) return;
+            var parts = line.split(/[=,;\\t]+/);
+            if (parts.length < 2) { parts = line.split(/\\s+/); }
+            if (parts.length < 2) { skipped++; return; }
+            var dateStr = parts[0].trim();
+            var val = parts[1].trim().replace(',', '.');
+            var m = dateStr.match(/^(\\d{2})\\.(\\d{2})\\.(\\d{4})\$/);
+            if (m) { dateStr = m[3]+'-'+m[2]+'-'+m[1]; }
+            var idx = -1;
+            for (var k=0;k<reports.length;k++) {
+                if (reports[k].date === dateStr) { idx = k; break; }
+            }
+            if (idx === -1) { skipped++; return; }
+            reports[idx].t_value = val;
+            var input = document.querySelector('.dwco-t-val[data-idx=\"'+idx+'\"]');
+            if (input) input.value = val;
+            applied++;
+        });
+        document.getElementById('dwco_hist_reports_json').value = JSON.stringify(reports);
+        document.getElementById('dwco_hist_apply_status').textContent = 'Zastosowano: '+applied+', pominięto: '+skipped+'.';
+    });
+
+    document.getElementById('dwco_hist_test_btn').addEventListener('click', function(){
+        var phone = document.getElementById('dwco_hist_test_phone').value.trim();
+        var count = parseInt(document.getElementById('dwco_hist_test_count').value, 10) || 5;
+        var statusEl = document.getElementById('dwco_hist_test_status');
+        if (!phone) { alert('Podaj numer testowy.'); return; }
+        if (reports.length === 0) { alert('Najpierw pobierz raporty.'); return; }
+
+        var n = Math.min(count, reports.length);
+        statusEl.textContent = 'Wysyłanie '+n+' testowych SMS na '+phone+'...\\n';
+        document.getElementById('dwco_hist_test_btn').disabled = true;
+
+        var i = 0;
+        function sendNext() {
+            if (i >= n) {
+                statusEl.textContent += 'Gotowe.';
+                document.getElementById('dwco_hist_test_btn').disabled = false;
+                return;
+            }
+            var r = reports[i];
+            var msg = r.summary;
+            if (r.t_value !== undefined && r.t_value !== null && String(r.t_value).trim() !== '') {
+                var tLine = 'T: ' + Math.round(parseFloat(r.t_value));
+                var msgLines = msg.split('\\n');
+                var pizzaIdx = -1;
+                for (var pi=0; pi<msgLines.length; pi++) {
+                    if (msgLines[pi].indexOf('PIZZA:') === 0) { pizzaIdx = pi; break; }
+                }
+                if (pizzaIdx !== -1) {
+                    msgLines.splice(pizzaIdx, 0, tLine);
+                } else {
+                    msgLines.push(tLine);
+                }
+                msg = msgLines.join('\\n');
+            }
+
+            var fd = new FormData();
+            fd.append('action','dwco_test_send_report');
+            fd.append('nonce', nonce);
+            fd.append('to', phone);
+            fd.append('message', msg);
+
+            statusEl.textContent += r.date + ': wysyłanie...\\n';
+            fetch(ajaxUrl, {method:'POST', body:fd})
+                .then(function(resp){ return resp.json(); })
+                .then(function(data){
+                    statusEl.textContent += r.date + ': ' + (data.success ? 'OK' : ('BŁĄD: '+(data.data||'?'))) + '\\n';
+                    i++;
+                    setTimeout(sendNext, 3000);
+                })
+                .catch(function(){
+                    statusEl.textContent += r.date + ': BŁĄD: brak połączenia\\n';
+                    i++;
+                    setTimeout(sendNext, 3000);
+                });
+        }
+        sendNext();
+    });
+})();
+</script>";
         }
 
         if ($tab === 'logs') {
@@ -1571,13 +2008,193 @@ final class Dotypos_Woo_Connector {
         if (!current_user_can('manage_options')) wp_die('Forbidden');
         check_admin_referer('dwco_sync_now');
         try {
-            $res = self::sync_menu(false);
+            $res = self::sync_prices_only();
+            update_option('dwco_last_sync_new_products',     $res['new_products'],     false);
+            update_option('dwco_last_sync_missing_products', $res['missing_products'], false);
             wp_redirect(admin_url('admin.php?page=dwco&tab=sync&dwco_msg=' . rawurlencode($res['summary'])));
             exit;
         } catch (Exception $e) {
             wp_redirect(admin_url('admin.php?page=dwco&tab=sync&dwco_err=' . rawurlencode($e->getMessage())));
             exit;
         }
+    }
+
+    public static function handle_add_selected_products() {
+        if (!current_user_can('manage_options')) wp_die('Forbidden');
+        check_admin_referer('dwco_add_selected_products');
+
+        $selected = isset($_POST['new_prod_idx']) && is_array($_POST['new_prod_idx'])
+            ? array_map('intval', $_POST['new_prod_idx'])
+            : [];
+
+        if (empty($selected)) {
+            wp_redirect(admin_url('admin.php?page=dwco&tab=sync&dwco_err=' . rawurlencode('Nie zaznaczono żadnych produktów.')));
+            exit;
+        }
+
+        $allNew = get_option('dwco_last_sync_new_products', []);
+        if (!is_array($allNew)) $allNew = [];
+
+        $opts = self::get_options();
+        $added = 0;
+
+        foreach ($selected as $idx) {
+            if (!isset($allNew[$idx])) continue;
+            $np = $allNew[$idx];
+
+            $product = new WC_Product_Simple();
+            $product->set_name($np['name']);
+            $product->set_status('publish');
+            $product->set_catalog_visibility('visible');
+            $product->set_regular_price(wc_format_decimal((float)$np['price']));
+            $post_id = $product->save();
+
+            if ($post_id) {
+                update_post_meta($post_id, '_dwco_dotypos_product_id', (string)$np['dotypos_id']);
+                update_post_meta($post_id, '_dwco_dotypos_synced_at', time());
+
+                // assign WC category by dotypos category id
+                if (!empty($np['category_id'])) {
+                    $terms = get_terms([
+                        'taxonomy'   => 'product_cat',
+                        'hide_empty' => false,
+                        'meta_query' => [[
+                            'key'     => 'dwco_dotypos_category_id',
+                            'value'   => (string)$np['category_id'],
+                            'compare' => '=',
+                        ]],
+                        'fields' => 'ids',
+                    ]);
+                    if (!empty($terms) && !is_wp_error($terms)) {
+                        wp_set_object_terms($post_id, [(int)$terms[0]], 'product_cat', false);
+                    }
+                }
+                $added++;
+            }
+        }
+
+        // Remove added products from the stored list
+        foreach ($selected as $idx) unset($allNew[$idx]);
+        update_option('dwco_last_sync_new_products', array_values($allNew), false);
+
+        wp_redirect(admin_url('admin.php?page=dwco&tab=sync&dwco_msg=' . rawurlencode("Dodano produktów: $added")));
+        exit;
+    }
+
+    private static function sync_prices_only(): array {
+        if (!class_exists('WC_Product_Simple')) throw new Exception('WooCommerce nie jest aktywny.');
+        $opts = self::get_options();
+        $cloudId = trim($opts['cloud_id'] ?? '');
+        if ($cloudId === '') throw new Exception('Brak cloudId w ustawieniach.');
+
+        $excludeDelivery = ($opts['sync_exclude_delivery_products'] ?? 'yes') === 'yes';
+        $deliveryCityPid = (int)trim($opts['delivery_city_product_id'] ?? '');
+        $deliveryKmPid   = (int)trim($opts['delivery_km_product_id'] ?? '');
+
+        // Fetch category names for reporting
+        $cats = self::fetch_all_entities($cloudId, 'categories', true, 'etag_categories', 'dwco_cached_categories');
+        $catNames = [];
+        foreach ($cats as $c) {
+            if (is_array($c) && isset($c['id'], $c['name'])) {
+                $catNames[(int)$c['id']] = (string)$c['name'];
+            }
+        }
+
+        $products = self::fetch_all_entities($cloudId, 'products', true, 'etag_products', 'dwco_cached_products');
+
+        $updated = 0; $skipped = 0;
+        $newProducts     = [];
+        $dotykackaIds    = [];  // all active dotypos IDs seen this sync
+
+        foreach ($products as $p) {
+            if (!is_array($p)) continue;
+            if (!empty($p['deleted'])) continue;
+            if (isset($p['display']) && !$p['display']) continue;
+
+            $pid = (int)($p['id'] ?? 0);
+            if ($pid <= 0) continue;
+
+            if ($excludeDelivery) {
+                if ($pid === $deliveryCityPid || $pid === $deliveryKmPid) continue;
+                $nm = (string)($p['name'] ?? '');
+                if (stripos($nm, 'dowóz') !== false || stripos($nm, 'dowoz') !== false) continue;
+            }
+
+            $dotykackaIds[] = $pid;
+
+            $price = null;
+            if (isset($p['priceWithVat'])) $price = (float)$p['priceWithVat'];
+            elseif (isset($p['priceWithoutVat'], $p['vat'])) $price = (float)$p['priceWithoutVat'] * (float)$p['vat'];
+            else $price = 0.0;
+
+            $post_id = self::find_product_by_dotypos_id($pid);
+
+            if ($post_id <= 0) {
+                $catId = (int)($p['_categoryId'] ?? 0);
+                $newProducts[] = [
+                    'dotypos_id'  => $pid,
+                    'name'        => (string)($p['name'] ?? ('Produkt '.$pid)),
+                    'category'    => $catId > 0 ? ($catNames[$catId] ?? ('Kategoria '.$catId)) : '—',
+                    'category_id' => $catId,
+                    'price'       => $price,
+                ];
+                continue;
+            }
+
+            $product = wc_get_product($post_id);
+            if (!$product) { $skipped++; continue; }
+
+            $cur = (float)$product->get_regular_price();
+            if (abs($cur - $price) > 0.0001) {
+                $product->set_regular_price(wc_format_decimal($price));
+                $product->save();
+                update_post_meta($post_id, '_dwco_dotypos_synced_at', time());
+                $updated++;
+            } else {
+                $skipped++;
+            }
+        }
+
+        // Find WC products that have a dotypos_id no longer present in Dotykacka
+        $missingProducts = [];
+        if (!empty($dotykackaIds)) {
+            $wcWithIds = new WP_Query([
+                'post_type'      => 'product',
+                'post_status'    => 'any',
+                'posts_per_page' => -1,
+                'meta_query'     => [[
+                    'key'     => '_dwco_dotypos_product_id',
+                    'compare' => 'EXISTS',
+                ]],
+                'fields' => 'ids',
+            ]);
+            foreach ($wcWithIds->posts as $wcId) {
+                $storedDotId = (int)get_post_meta((int)$wcId, '_dwco_dotypos_product_id', true);
+                if ($storedDotId > 0 && !in_array($storedDotId, $dotykackaIds, true)) {
+                    $wcProd = wc_get_product((int)$wcId);
+                    if ($wcProd) {
+                        $missingProducts[] = [
+                            'wc_id'      => (int)$wcId,
+                            'name'       => $wcProd->get_name(),
+                            'dotypos_id' => $storedDotId,
+                            'edit_url'   => get_edit_post_link((int)$wcId, 'raw'),
+                        ];
+                    }
+                }
+            }
+        }
+
+        $summary = sprintf(
+            "Ceny zaktualizowane: %d | Pominięte: %d | Nowe w Dotykačce: %d | Brak w Dotykačce: %d",
+            $updated, $skipped, count($newProducts), count($missingProducts)
+        );
+        return [
+            'summary'          => $summary,
+            'updated'          => $updated,
+            'skipped'          => $skipped,
+            'new_products'     => $newProducts,
+            'missing_products' => $missingProducts,
+        ];
     }
 
     private static function sync_menu(bool $is_import): array {
@@ -1830,12 +2447,15 @@ final class Dotypos_Woo_Connector {
             $summary = self::build_daily_report_summary($dateFrom, $salaJson, $ogrodJson);
 
             self::log('info', 'DAILY REPORT SUMMARY', [
-                'dateFrom' => $dateFrom,
-                'dateTo'   => $dateTo,
-                'summary'  => $summary,
+                'dateFrom'  => $dateFrom,
+                'dateTo'    => $dateTo,
+                'summary'   => $summary,
+                'salaJson'  => $salaJson,
+                'ogrodJson' => $ogrodJson,
             ]);
 
             set_transient('dwco_last_daily_report_summary', $summary, 10 * MINUTE_IN_SECONDS);
+            set_transient('dwco_last_daily_report_debug', ['sala' => $salaJson, 'ogrod' => $ogrodJson], 10 * MINUTE_IN_SECONDS);
 
             wp_redirect(admin_url('admin.php?page=dwco&tab=diagnostics&dwco_msg='.rawurlencode('Raport wygenerowany. Zobacz poniżej.')));
             exit;
@@ -1854,15 +2474,17 @@ final class Dotypos_Woo_Connector {
             $summary = get_transient('dwco_last_daily_report_summary');
             if (!$summary) throw new Exception('Brak ostatniego raportu. Najpierw wygeneruj raport przyciskiem "Policz raport testowo".');
 
-            $result = self::send_smsapi_sms((string)$summary);
+            $results = self::send_daily_report_all_channels((string)$summary);
 
-            self::log('info', 'DAILY REPORT SMS SENT', [
-                'http' => $result['http'],
-                'raw'  => $result['raw'],
-                'json' => $result['json'],
-            ]);
+            self::log('info', 'DAILY REPORT TEST SEND', ['channels' => $results]);
 
-            wp_redirect(admin_url('admin.php?page=dwco&tab=diagnostics&dwco_msg='.rawurlencode('SMS wysłany. HTTP: '.$result['http'])));
+            $parts = [];
+            foreach ($results as $ch => $r) {
+                $parts[] = strtoupper($ch) . ': ' . ($r['ok'] ? 'OK' : ('BŁĄD: ' . ($r['error'] ?? '?')));
+            }
+            $msg = empty($parts) ? 'Żaden kanał nie jest włączony.' : implode(' | ', $parts);
+
+            wp_redirect(admin_url('admin.php?page=dwco&tab=diagnostics&dwco_msg='.rawurlencode($msg)));
             exit;
         } catch (Exception $e) {
             self::log('error', 'Daily report SMS failed', ['ex' => $e->getMessage()]);
@@ -1877,13 +2499,11 @@ final class Dotypos_Woo_Connector {
     }
 
     private static function mm_money(float $amount): string {
-        return number_format($amount, 2, ',', '') . ' zł';
+        return (string)(int)round($amount);
     }
 
     private static function mm_qty($qty): string {
-        $f = (float)$qty;
-        if ($f == (int)$f) return (string)(int)$f;
-        return number_format($f, 1, ',', '');
+        return (string)(int)round((float)$qty);
     }
 
     private static function build_daily_report_summary(string $date, array $salaJson, array $ogrodJson): string {
@@ -1904,9 +2524,7 @@ final class Dotypos_Woo_Connector {
             foreach ($employeeSales as $emp) {
                 if (!is_array($emp)) continue;
                 $name   = (string)($emp['name'] ?? '');
-                $amount = self::mm_to_float(
-                    $emp['saleValue'] ?? ($emp['totalValue'] ?? ($emp['revenue'] ?? ($emp['total'] ?? 0)))
-                );
+                $amount = self::mm_to_float($emp['value'] ?? 0);
                 if (stripos($name, '/WYNOS') !== false) {
                     $w += $amount;
                 } else {
@@ -1926,9 +2544,7 @@ final class Dotypos_Woo_Connector {
                 if (!is_array($pt)) continue;
                 $typeId = (string)($pt['typeId'] ?? '');
                 if ($typeId === $cardMethodId) {
-                    $t += self::mm_to_float(
-                        $pt['totalValue'] ?? ($pt['saleValue'] ?? ($pt['value'] ?? 0))
-                    );
+                    $t += self::mm_to_float($pt['total'] ?? 0);
                 }
             }
         }
@@ -1951,16 +2567,15 @@ final class Dotypos_Woo_Connector {
 
         return implode("\n", [
             "MM - {$dateFormatted}",
-            "Utarg: " . self::mm_money($total),
+            self::mm_money($total),
             "S: " . self::mm_money($s),
             "O: " . self::mm_money($o),
             "W: " . self::mm_money($w),
-            "T: " . self::mm_money($t),
-            "PIZZA: " . self::mm_qty($pizzaCount) . " szt.",
+            "PIZZA: " . self::mm_qty($pizzaCount),
         ]);
     }
 
-    private static function send_smsapi_sms(string $message): array {
+    private static function send_via_smsapi(string $message): array {
         $opts   = self::get_options();
         $token  = trim($opts['daily_report_smsapi_token'] ?? '');
         $phone  = trim($opts['daily_report_phone'] ?? '');
@@ -1969,32 +2584,291 @@ final class Dotypos_Woo_Connector {
         if ($token === '') throw new Exception('Brak SMSAPI token w ustawieniach.');
         if ($phone === '') throw new Exception('Brak numeru telefonu w ustawieniach.');
 
-        $params = [
-            'to'      => $phone,
-            'message' => $message,
-            'format'  => 'json',
-        ];
-        if ($sender !== '') {
-            $params['from'] = $sender;
-        }
+        $body = ['to' => $phone, 'message' => $message, 'encoding' => 'utf-8'];
+        if ($sender !== '') $body['from'] = $sender;
 
         $resp = wp_remote_post('https://api.smsapi.pl/sms.do', [
             'headers' => [
                 'Authorization' => 'Bearer ' . $token,
+                'Content-Type'  => 'application/x-www-form-urlencoded',
             ],
-            'body'    => $params,
+            'body'    => http_build_query($body),
             'timeout' => 20,
         ]);
 
-        if (is_wp_error($resp)) {
-            throw new Exception('SMSAPI request failed: ' . $resp->get_error_message());
-        }
+        if (is_wp_error($resp)) throw new Exception('SMSAPI request failed: ' . $resp->get_error_message());
 
         $code = wp_remote_retrieve_response_code($resp);
         $raw  = wp_remote_retrieve_body($resp);
         $json = json_decode($raw, true);
 
+        if ($code !== 200 && $code !== 201) {
+            throw new Exception('SMSAPI error: HTTP ' . $code . ' | ' . $raw);
+        }
+
         return ['http' => $code, 'raw' => $raw, 'json' => $json];
+    }
+
+    private static function send_via_telegram(string $message): array {
+        $opts     = self::get_options();
+        $botToken = trim($opts['daily_report_telegram_bot_token'] ?? '');
+        $chatId   = trim($opts['daily_report_telegram_chat_id'] ?? '');
+
+        if ($botToken === '') throw new Exception('Brak Telegram bot token w ustawieniach.');
+        if ($chatId === '')   throw new Exception('Brak Telegram chat ID w ustawieniach.');
+
+        $url  = "https://api.telegram.org/bot{$botToken}/sendMessage";
+        $resp = wp_remote_post($url, [
+            'headers' => ['Content-Type' => 'application/json'],
+            'body'    => wp_json_encode(['chat_id' => $chatId, 'text' => $message]),
+            'timeout' => 20,
+        ]);
+
+        if (is_wp_error($resp)) throw new Exception('Telegram request failed: ' . $resp->get_error_message());
+
+        $code = wp_remote_retrieve_response_code($resp);
+        $raw  = wp_remote_retrieve_body($resp);
+        $json = json_decode($raw, true);
+
+        if ($code !== 200 || empty($json['ok'])) {
+            throw new Exception('Telegram error: HTTP ' . $code . ' | ' . $raw);
+        }
+
+        return ['http' => $code, 'raw' => $raw, 'json' => $json];
+    }
+
+    private static function send_via_email(string $message): array {
+        $opts    = self::get_options();
+        $emailTo = trim($opts['daily_report_email_to'] ?? '');
+
+        if ($emailTo === '') throw new Exception('Brak adresu e-mail w ustawieniach.');
+
+        $date    = current_time('d.m.Y');
+        $subject = "Raport dzienny MM – {$date}";
+        $body    = nl2br(esc_html($message));
+        $headers = ['Content-Type: text/html; charset=UTF-8'];
+
+        $ok = wp_mail($emailTo, $subject, $body, $headers);
+
+        if (!$ok) throw new Exception('wp_mail zwróciło false — sprawdź konfigurację SMTP.');
+
+        return ['http' => 200, 'raw' => 'ok', 'json' => null];
+    }
+
+    private static function send_via_smsgateway(string $message, string $toOverride = ''): array {
+        $opts    = self::get_options();
+        $apiKey  = trim($opts['daily_report_smsgateway_api_key'] ?? '');
+        $from    = trim($opts['daily_report_smsgateway_from_phone'] ?? '');
+        $to      = $toOverride !== '' ? $toOverride : trim($opts['daily_report_smsgateway_to_phone'] ?? '');
+
+        if ($apiKey === '') throw new Exception('Brak InfiniReach API Key w ustawieniach.');
+        if ($from === '')   throw new Exception('Brak numeru telefonu nadawcy (InfiniReach) w ustawieniach.');
+        if ($to === '')     throw new Exception('Brak numeru telefonu odbiorcy (InfiniReach) w ustawieniach.');
+
+        $resp = wp_remote_post('https://api.infinireach.io/api/v1/messages', [
+            'headers' => [
+                'X-API-Key'    => $apiKey,
+                'Content-Type' => 'application/json',
+            ],
+            'body'    => wp_json_encode([
+                'to'      => $to,
+                'message' => $message,
+                'from'    => $from,
+                'channel' => 'sms',
+            ]),
+            'timeout' => 20,
+        ]);
+
+        if (is_wp_error($resp)) throw new Exception('InfiniReach request failed: ' . $resp->get_error_message());
+
+        $code = wp_remote_retrieve_response_code($resp);
+        $raw  = wp_remote_retrieve_body($resp);
+        $json = json_decode($raw, true);
+
+        if ($code !== 200 && $code !== 201) {
+            throw new Exception('InfiniReach error: HTTP ' . $code . ' | ' . $raw);
+        }
+
+        return ['http' => $code, 'raw' => $raw, 'json' => $json];
+    }
+
+    private static function send_daily_report_all_channels(string $summary): array {
+        $opts    = self::get_options();
+        $results = [];
+
+        if (($opts['daily_report_sms_enabled'] ?? 'no') === 'yes') {
+            try {
+                $r = self::send_via_smsapi($summary);
+                $results['sms'] = ['ok' => true, 'http' => $r['http']];
+            } catch (Exception $e) {
+                $results['sms'] = ['ok' => false, 'error' => $e->getMessage()];
+                self::log('error', 'Daily report SMS failed', ['ex' => $e->getMessage()]);
+            }
+        }
+
+        if (($opts['daily_report_telegram_enabled'] ?? 'no') === 'yes') {
+            try {
+                $r = self::send_via_telegram($summary);
+                $results['telegram'] = ['ok' => true, 'http' => $r['http']];
+            } catch (Exception $e) {
+                $results['telegram'] = ['ok' => false, 'error' => $e->getMessage()];
+                self::log('error', 'Daily report Telegram failed', ['ex' => $e->getMessage()]);
+            }
+        }
+
+        if (($opts['daily_report_email_enabled'] ?? 'no') === 'yes') {
+            try {
+                $r = self::send_via_email($summary);
+                $results['email'] = ['ok' => true, 'http' => $r['http']];
+            } catch (Exception $e) {
+                $results['email'] = ['ok' => false, 'error' => $e->getMessage()];
+                self::log('error', 'Daily report email failed', ['ex' => $e->getMessage()]);
+            }
+        }
+
+        if (($opts['daily_report_smsgateway_enabled'] ?? 'no') === 'yes') {
+            try {
+                $r = self::send_via_smsgateway($summary);
+                $results['smsgateway'] = ['ok' => true, 'http' => $r['http']];
+            } catch (Exception $e) {
+                $results['smsgateway'] = ['ok' => false, 'error' => $e->getMessage()];
+                self::log('error', 'Daily report SMS Gateway failed', ['ex' => $e->getMessage()]);
+            }
+        }
+
+        return $results;
+    }
+
+    // ========== HISTORICAL REPORTS ==========
+
+    public static function ajax_fetch_historical_report(): void {
+        if (!current_user_can('manage_options')) wp_die('Forbidden', '', 403);
+        check_ajax_referer('dwco_historical_report', 'nonce');
+
+        $date = isset($_POST['date']) ? sanitize_text_field($_POST['date']) : '';
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            wp_send_json_error('Nieprawidłowa data.');
+        }
+
+        try {
+            $opts    = self::get_options();
+            $cloudId = trim($opts['cloud_id'] ?? '');
+            if ($cloudId === '') throw new Exception('Brak cloud_id.');
+
+            $tz    = wp_timezone();
+            $dtFrom = new DateTime($date, $tz);
+            $dtTo   = clone $dtFrom;
+            $dtTo->modify('+1 day');
+            $dateTo = $dtTo->format('Y-m-d');
+
+            $branchSala  = trim($opts['daily_report_branch_sala_id']  ?? '146005859');
+            $branchOgrod = trim($opts['daily_report_branch_ogrod_id'] ?? '150149839');
+
+            $salaResp  = self::api_request('GET', "https://api.dotykacka.cz/v2/clouds/{$cloudId}/branches/{$branchSala}/sales-report?dateFrom={$date}&dateTo={$dateTo}");
+            $ogrodResp = self::api_request('GET', "https://api.dotykacka.cz/v2/clouds/{$cloudId}/branches/{$branchOgrod}/sales-report?dateFrom={$date}&dateTo={$dateTo}");
+
+            $salaJson  = is_array($salaResp['json'])  ? $salaResp['json']  : [];
+            $ogrodJson = is_array($ogrodResp['json']) ? $ogrodResp['json'] : [];
+
+            $summary = self::build_daily_report_summary($date, $salaJson, $ogrodJson);
+
+            wp_send_json_success(['date' => $date, 'summary' => $summary]);
+        } catch (Exception $e) {
+            wp_send_json_error($e->getMessage());
+        }
+    }
+
+    public static function ajax_test_send_report(): void {
+        if (!current_user_can('manage_options')) wp_die('Forbidden', '', 403);
+        check_ajax_referer('dwco_historical_report', 'nonce');
+
+        $to      = isset($_POST['to']) ? sanitize_text_field($_POST['to']) : '';
+        $message = isset($_POST['message']) ? sanitize_textarea_field(wp_unslash($_POST['message'])) : '';
+
+        if ($to === '')      wp_send_json_error('Brak numeru testowego.');
+        if ($message === '') wp_send_json_error('Brak treści wiadomości.');
+
+        try {
+            $r = self::send_via_smsgateway($message, $to);
+            wp_send_json_success(['http' => $r['http']]);
+        } catch (Exception $e) {
+            wp_send_json_error($e->getMessage());
+        }
+    }
+
+    public static function handle_schedule_historical_send(): void {
+        if (!current_user_can('manage_options')) wp_die('Forbidden');
+        check_admin_referer('dwco_schedule_historical_send');
+
+        $raw     = isset($_POST['reports_json']) ? wp_unslash($_POST['reports_json']) : '';
+        $reports = json_decode($raw, true);
+
+        if (!is_array($reports) || empty($reports)) {
+            wp_redirect(admin_url('admin.php?page=dwco&tab=historical&dwco_err=' . rawurlencode('Brak raportów — najpierw pobierz dane.')));
+            exit;
+        }
+
+        // Keep only {date, summary}, insert T: line before PIZZA if provided
+        $clean = [];
+        foreach ($reports as $r) {
+            if (!isset($r['date'], $r['summary'])) continue;
+            $summary = sanitize_textarea_field($r['summary']);
+            $tVal    = isset($r['t_value']) ? trim(sanitize_text_field($r['t_value'])) : '';
+            if ($tVal !== '' && is_numeric($tVal)) {
+                $tLine = "T: " . (string)(int)round((float)$tVal);
+                $lines = explode("\n", $summary);
+                $pizzaIdx = null;
+                foreach ($lines as $idx => $line) {
+                    if (strpos($line, 'PIZZA:') === 0) { $pizzaIdx = $idx; break; }
+                }
+                if ($pizzaIdx !== null) {
+                    array_splice($lines, $pizzaIdx, 0, [$tLine]);
+                } else {
+                    $lines[] = $tLine;
+                }
+                $summary = implode("\n", $lines);
+            }
+            $clean[] = ['date' => sanitize_text_field($r['date']), 'summary' => $summary];
+        }
+
+        update_option('dwco_historical_send_queue', $clean, false);
+
+        // Schedule for tomorrow 23:00 Warsaw time
+        $tz      = new DateTimeZone('Europe/Warsaw');
+        $sendAt  = new DateTime('tomorrow 23:00:00', $tz);
+        wp_clear_scheduled_hook('dwco_send_historical_batch');
+        wp_schedule_single_event($sendAt->getTimestamp(), 'dwco_send_historical_batch');
+
+        wp_redirect(admin_url('admin.php?page=dwco&tab=historical&dwco_msg=' . rawurlencode('Zaplanowano wysyłkę ' . count($clean) . ' raportów na ' . $sendAt->format('d.m.Y H:i') . '.')));
+        exit;
+    }
+
+    public static function handle_cancel_historical_send(): void {
+        if (!current_user_can('manage_options')) wp_die('Forbidden');
+        check_admin_referer('dwco_cancel_historical_send');
+
+        wp_clear_scheduled_hook('dwco_send_historical_batch');
+        delete_option('dwco_historical_send_queue');
+
+        wp_redirect(admin_url('admin.php?page=dwco&tab=historical&dwco_msg=' . rawurlencode('Zaplanowana wysyłka raportów historycznych została anulowana.')));
+        exit;
+    }
+
+    public static function send_historical_batch(): void {
+        $queue = get_option('dwco_historical_send_queue', []);
+        if (!is_array($queue) || empty($queue)) return;
+
+        $sent = 0;
+        foreach ($queue as $report) {
+            $summary = $report['summary'] ?? '';
+            if ($summary === '') continue;
+            self::send_daily_report_all_channels($summary);
+            $sent++;
+            if ($sent < count($queue)) sleep(3); // pause between messages
+        }
+
+        delete_option('dwco_historical_send_queue');
+        self::log('info', 'Historical batch sent', ['count' => $sent]);
     }
 
     public static function maybe_send_scheduled_daily_report(): void {
@@ -2003,15 +2877,26 @@ final class Dotypos_Woo_Connector {
 
         $tz     = wp_timezone();
         $now    = new DateTime('now', $tz);
-        $dow    = (int)$now->format('N'); // 1=Mon … 7=Sun
+        $dow    = (int)$now->format('N'); // 1=Mon…7=Sun
         $hour   = (int)$now->format('H');
         $minute = (int)$now->format('i');
 
-        // Mon–Thu + Sun at 22:40–22:44; Fri–Sat at 23:40–23:44
-        $weekdaySlot = in_array($dow, [1,2,3,4,7], true) && $hour === 22 && $minute >= 40 && $minute <= 44;
-        $weekendSlot = in_array($dow, [5,6], true)       && $hour === 23 && $minute >= 40 && $minute <= 44;
+        $timeWeekday = trim($opts['daily_report_time_weekday'] ?? '22:40');
+        $timeWeekend = trim($opts['daily_report_time_weekend'] ?? '23:40');
 
-        if (!$weekdaySlot && !$weekendSlot) return;
+        $inWindow = static function (string $hhmm) use ($hour, $minute): bool {
+            [$h, $m] = array_map('intval', explode(':', $hhmm));
+            $nowMin  = $hour * 60 + $minute;
+            $slotMin = $h * 60 + $m;
+            return $nowMin >= $slotMin && $nowMin <= $slotMin + 10;
+        };
+
+        $isWeekday = in_array($dow, [1,2,3,4,7], true);
+        $isWeekend = in_array($dow, [5,6], true);
+
+        if ($isWeekday && !$inWindow($timeWeekday)) return;
+        if ($isWeekend && !$inWindow($timeWeekend)) return;
+        if (!$isWeekday && !$isWeekend) return;
 
         $dateFrom = $now->format('Y-m-d');
 
@@ -2043,14 +2928,14 @@ final class Dotypos_Woo_Connector {
 
             set_transient('dwco_last_daily_report_summary', $summary, 60 * MINUTE_IN_SECONDS);
 
-            $smsResult = self::send_smsapi_sms($summary);
+            $channelResults = self::send_daily_report_all_channels($summary);
 
             update_option($guardKey, current_time('mysql'), false);
 
             self::log('info', 'DAILY REPORT SCHEDULED SENT', [
                 'dateFrom' => $dateFrom,
                 'summary'  => $summary,
-                'sms_http' => $smsResult['http'],
+                'channels' => $channelResults,
             ]);
         } catch (Exception $e) {
             self::log('error', 'Scheduled daily report failed', ['ex' => $e->getMessage()]);
